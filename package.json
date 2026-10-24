@@ -1,0 +1,32 @@
+{
+  "name": "worklog-claude",
+  "version": "0.1.0",
+  "description": "Claude Code plugin that auto-logs commits, PRs and docs per ticket (Jira/ADO/any prefix)",
+  "type": "module",
+  "bin": {
+    "worklog": "./bin/worklog.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "commands/",
+    "skills/",
+    ".claude-plugin/",
+    "README.md"
+  ],
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "worklog",
+    "jira",
+    "azure-devops",
+    "ticket"
+  ],
+  "license": "MIT"
+}
