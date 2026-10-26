@@ -1,6 +1,7 @@
 import {
   loadConfig,
   saveConfig,
+  ensureDataHome,
   getConfigPath,
   getWorklogDir
 } from './lib/config.mjs';
@@ -10,6 +11,11 @@ import { syncGit, syncDocs } from './sync.mjs';
 import { installPlugin } from './install.mjs';
 import { buildIndex, loadIndex } from './lib/index.mjs';
 import * as safety from './lib/safety.mjs';
+import * as configstore from './lib/configstore.mjs';
+import * as scheduler from './lib/scheduler.mjs';
+import { diagnose, formatReport } from './lib/doctor.mjs';
+import { runTick, readDailyNote, readItemNote } from './lib/agent.mjs';
+import { summary as spendSummary } from './lib/budget.mjs';
 
 export async function main(argv) {
   const [cmd, ...rest] = argv;
@@ -18,8 +24,19 @@ export async function main(argv) {
 
   switch (cmd) {
     case 'install':      return installPlugin();
+    case 'setup':        return setup(flags);
+    case 'doctor':       return doctor({ json });
+    case 'tick':         return tick(positional, flags, { json });
+    case 'today':        return showDay(positional[0], { json });
+    case 'day':          return showDay(positional[0], { json });
+    case 'item':         return showItem(positional[0]);
+    case 'schedule':     return schedule(flags);
+    case 'unschedule':   return unschedule();
+    case 'pause':        return setPaused(true);
+    case 'resume':       return setPaused(false);
+    case 'status':       return showStatus({ json });
     case 'init':         return initCfg();
-    case 'config':       return showConfig();
+    case 'config':       return configCmd(positional, { json });
     case 'backfill':     return backfill(rest);
     case 'sync':         return backfill(rest);
     case 'list':         return listAll({ json });
@@ -44,12 +61,31 @@ export async function main(argv) {
 }
 
 function help() {
-  console.log(`worklog — per-ticket activity log (Phase 1)
+  console.log(`worklog — per-ticket activity log
 
-Commands:
+Setup and health:
   worklog install                   Install the plugin into ~/.claude/plugins/worklog
+  worklog setup [--interval N]      Create the data home and schedule the background tick
+  worklog doctor                    Diagnose capture, tick, scheduler and budget
+  worklog status                    One-line view of capture, last tick and spend
+  worklog schedule [--interval N]   Register the tick with the OS scheduler
+  worklog unschedule                Remove the scheduled tick
+  worklog pause | resume            Stop or restart event capture
+
+Captured work:
+  worklog tick [--force] [DAY]      Summarise captured events into notes now
+  worklog today [DAY]               Print the daily note
+  worklog item <KEY>                Print the rolling note for one work item
+
+Config:
   worklog init                      Create a default config at ~/.worklog/config.json
   worklog config                    Print current config and its path
+  worklog config set <key> <value>  Change a setting (backed up first)
+  worklog config get <key>          Read one setting
+  worklog config undo               Revert the last config change
+  worklog config history            List recorded config changes
+
+Backfill and query:
   worklog backfill [--since DATE]   Scan configured repos + docs folders, build tickets
   worklog sync                      Alias for backfill (no --since)
   worklog list                      List tickets, sorted by last-active desc
@@ -105,6 +141,157 @@ function showConfig() {
   console.log(`Config path: ${getConfigPath()}`);
   console.log(`Data dir:    ${getWorklogDir()}\n`);
   console.log(JSON.stringify(cfg, null, 2));
+}
+
+async function configCmd(positional, { json } = {}) {
+  const [sub, ...rest] = positional;
+  switch (sub) {
+    case undefined: return showConfig();
+    case 'get': {
+      if (!rest[0]) { console.error('Usage: worklog config get <dotted.key>'); process.exit(1); }
+      const value = configstore.getValue(rest[0]);
+      console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+      return;
+    }
+    case 'set': {
+      const [key, ...valueParts] = rest;
+      if (!key || !valueParts.length) {
+        console.error('Usage: worklog config set <dotted.key> <value>');
+        process.exit(1);
+      }
+      try {
+        await configstore.setValue(key, valueParts.join(' '));
+        console.log(`✓ ${key} = ${JSON.stringify(configstore.getValue(key))}`);
+        console.log('  (previous value backed up — `worklog config undo` reverts it)');
+      } catch (e) {
+        console.error(e.message);
+        process.exit(1);
+      }
+      return;
+    }
+    case 'undo': {
+      const r = await configstore.undo();
+      console.log(r.restored ? `✓ restored ${r.restored}` : `Nothing to undo: ${r.reason}`);
+      return;
+    }
+    case 'history': {
+      const entries = configstore.history();
+      if (json) { console.log(JSON.stringify(entries, null, 2)); return; }
+      if (!entries.length) { console.log('No config changes recorded yet.'); return; }
+      for (const e of entries.slice(-25)) console.log(`${e.ts}  ${e.reason}`);
+      return;
+    }
+    default:
+      console.error(`Unknown config subcommand: ${sub}\nTry: get, set, undo, history`);
+      process.exit(1);
+  }
+}
+
+async function setup(flags) {
+  ensureDataHome();
+  loadConfig();
+  console.log(`Data home: ${getWorklogDir()}`);
+  console.log(`Config:    ${getConfigPath()}`);
+
+  const interval = Number(flags.interval ?? 5);
+  const s = scheduler.install(interval);
+  console.log(s.ok
+    ? `✓ tick scheduled via ${s.kind} every ${s.intervalMinutes} min`
+    : `! could not schedule the tick (${s.kind}): ${s.detail}`);
+
+  console.log('');
+  console.log('Restart Claude Code so the hooks load, then run `worklog doctor`.');
+}
+
+function doctor({ json } = {}) {
+  const report = diagnose();
+  if (json) { console.log(JSON.stringify(report, null, 2)); return; }
+  console.log(formatReport(report));
+  if (!report.healthy) process.exitCode = 1;
+}
+
+function schedule(flags) {
+  const s = scheduler.install(Number(flags.interval ?? 5));
+  console.log(s.ok
+    ? `✓ ${s.kind}: tick runs every ${s.intervalMinutes} min\n  ${s.detail}`
+    : `✗ could not schedule (${s.kind}): ${s.detail}`);
+  if (!s.ok) process.exitCode = 1;
+}
+
+function unschedule() {
+  const r = scheduler.remove();
+  console.log(r.ok ? `✓ scheduled tick ${r.detail}` : `✗ ${r.detail}`);
+  if (!r.ok) process.exitCode = 1;
+}
+
+async function setPaused(paused) {
+  await configstore.setValue('capture.paused', paused ? 'true' : 'false');
+  console.log(paused
+    ? '✓ capture paused — hooks stay loaded but record nothing'
+    : '✓ capture resumed');
+}
+
+async function tick(positional, flags, { json } = {}) {
+  const days = positional.filter((a) => /^\d{4}-\d{2}-\d{2}$/.test(a));
+  const r = await runTick({ force: !!flags.force, days: days.length ? days : null });
+  if (json) { console.log(JSON.stringify(r, null, 2)); return; }
+  if (r.skipped) { console.log(`Skipped: ${r.skipped}`); return; }
+  if (r.error)   { console.log(`Failed: ${r.error}`); process.exitCode = 1; return; }
+  console.log(`✓ ${r.days.length} day(s) processed, ${r.items} item-day(s) summarised`);
+  console.log(`  ${r.modelCalls} model call(s), ${r.notesWritten} note(s) written, ${r.ms}ms`);
+  if (r.pruned) console.log(`  ${r.pruned} raw day(s) pruned`);
+  if (r.droppedClaims) console.log(`  ${r.droppedClaims} uncited claim(s) dropped`);
+  for (const reason of r.reasons) console.log(`  note: ${reason}`);
+}
+
+function showDay(day, { json } = {}) {
+  const target = day || new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    console.error('Usage: worklog today [YYYY-MM-DD]');
+    process.exit(1);
+  }
+  const note = readDailyNote(target);
+  if (json) { console.log(JSON.stringify({ day: target, note }, null, 2)); return; }
+  if (!note) {
+    console.log(`No note for ${target} yet. Run \`worklog tick\` after some activity.`);
+    return;
+  }
+  console.log(note);
+}
+
+function showItem(key) {
+  if (!key) { console.error('Usage: worklog item <KEY>'); process.exit(1); }
+  const note = readItemNote(key);
+  if (!note) {
+    console.log(`No note for ${key} yet. Run \`worklog tick\` first.`);
+    return;
+  }
+  console.log(note);
+}
+
+function showStatus({ json } = {}) {
+  const cfg = loadConfig();
+  const s = scheduler.status();
+  const spend = spendSummary();
+  const report = diagnose();
+  const state = { capture: cfg.capture?.paused ? 'paused' : cfg.capture?.enabled ? 'on' : 'off' };
+  const lastTick = report.checks.find((c) => c.name === 'last tick')?.detail || 'never';
+  const capture = report.checks.find((c) => c.name === 'capture')?.detail || 'nothing yet';
+
+  if (json) {
+    console.log(JSON.stringify({
+      capture: state.capture, scheduled: s.installed, scheduler: s.kind,
+      lastTick, events: capture, spend, healthy: report.healthy
+    }, null, 2));
+    return;
+  }
+  console.log('');
+  console.log(`Capture:   ${state.capture} (${capture})`);
+  console.log(`Schedule:  ${s.installed ? `${s.kind}, active` : `${s.kind}, not scheduled`}`);
+  console.log(`Last tick: ${lastTick}`);
+  console.log(`Spend:     ${spend.calls} model call(s), $${spend.usd.toFixed(3)} today`);
+  console.log(`Health:    ${report.counts.ok} ok, ${report.counts.warn} warning, ${report.counts.fail} failing`);
+  console.log('');
 }
 
 async function backfill(args) {

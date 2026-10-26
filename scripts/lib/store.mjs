@@ -72,6 +72,7 @@ export function newTicket(key) {
     artifacts: [],
     files: [],
     sessions: [],
+    days: [],
     rca: null,
     notes: ''
   };
@@ -185,16 +186,34 @@ export function addArtifact(ticket, artifact) {
   return entry;
 }
 
+/**
+ * Counts are stored per day and summed, never incremented. Reprocessing a day
+ * must replace that day's contribution rather than add to it, or the tick stops
+ * being idempotent.
+ */
 export function addFileTouch(ticket, file) {
-  const entry = { id: stableId('p', file.path), ...file };
-  const existing = ticket.files.find((x) => x.id === entry.id);
-  if (existing) {
-    existing.count = (existing.count || 1) + (file.count || 1);
-    if (file.date && (!existing.lastSeen || file.date > existing.lastSeen)) existing.lastSeen = file.date;
-  } else {
-    ticket.files.push({ ...entry, count: file.count || 1, lastSeen: file.date || null });
+  const id = stableId('p', file.path);
+  let entry = ticket.files.find((x) => x.id === id);
+  if (!entry) {
+    entry = { id, path: file.path, byDay: {}, count: 0, lastSeen: null };
+    ticket.files.push(entry);
   }
+  if (!entry.byDay) entry.byDay = { [file.date || 'unknown']: entry.count || 0 };
+  entry.byDay[file.date || 'unknown'] = file.count || 1;
+  entry.count = Object.values(entry.byDay).reduce((n, v) => n + v, 0);
+  const days = Object.keys(entry.byDay).sort();
+  entry.lastSeen = days.at(-1) || null;
   touchDate(ticket, file.date);
+  return entry;
+}
+
+/** What this item looked like on one day — the daily note renders from these. */
+export function upsertDay(ticket, day, entry) {
+  const i = ticket.days.findIndex((d) => d.day === day);
+  if (i === -1) ticket.days.push({ day, ...entry });
+  else ticket.days[i] = { ...ticket.days[i], ...entry, day };
+  ticket.days.sort((a, b) => a.day.localeCompare(b.day));
+  touchDate(ticket, day);
 }
 
 export function addSession(ticket, session) {
