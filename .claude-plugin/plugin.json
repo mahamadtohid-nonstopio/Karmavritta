@@ -1,6 +1,7 @@
 {
   "name": "worklog",
-  "version": "0.1.0",
-  "description": "Auto-logs commits, PRs and docs per ticket for any key prefix",
-  "author": "Mahamadtohid"
+  "version": "0.2.0",
+  "description": "Captures Claude Code sessions and auto-logs commits, docs and findings per ticket",
+  "author": "Mahamadtohid",
+  "hooks": "./hooks/hooks.json"
 }

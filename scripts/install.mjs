@@ -5,7 +5,7 @@ import * as safety from './lib/safety.mjs';
 import { getPluginInstallDir, getRuntimeDir } from './lib/paths.mjs';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PAYLOAD = ['.claude-plugin', 'commands', 'hooks', 'scripts', 'skills'];
+const PAYLOAD = ['.claude-plugin', 'bin', 'commands', 'hooks', 'prompts', 'scripts', 'skills'];
 
 export async function installPlugin() {
   const target = getPluginInstallDir();

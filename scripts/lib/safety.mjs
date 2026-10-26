@@ -193,6 +193,9 @@ export function runCapture(command, args = [], opts = {}) {
     const stdout = execFileSync(command, args, {
       encoding: 'utf8',
       windowsHide: true,
+      // execFileSync inherits stderr by default, which would let a probe like
+      // `schtasks /Query` print its own noise straight at the user.
+      stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024,
       cwd: opts.cwd,
       timeout: opts.timeout,
