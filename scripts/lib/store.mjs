@@ -6,6 +6,8 @@ function lockDir() {
   return path.join(getTicketsDir(), '.lock');
 }
 
+const STALE_LOCK_MS = 15_000;
+
 async function acquireLock(timeoutMs = 5000) {
   const start = Date.now();
   while (true) {
@@ -14,16 +16,16 @@ async function acquireLock(timeoutMs = 5000) {
       return;
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
+      // Opportunistic stale-lock recovery on every retry, not only at timeout.
+      try {
+        const stat = fs.statSync(lockDir());
+        if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+          fs.rmdirSync(lockDir());
+          continue;
+        }
+      } catch {}
       if (Date.now() - start > timeoutMs) {
-        // Stale-lock recovery: if the lock dir is older than 60s, remove it
-        try {
-          const stat = fs.statSync(lockDir());
-          if (Date.now() - stat.mtimeMs > 60_000) {
-            fs.rmdirSync(lockDir());
-            continue;
-          }
-        } catch {}
-        throw new Error('Could not acquire worklog lock');
+        throw new Error(`Could not acquire worklog lock at ${lockDir()} (held for > ${timeoutMs}ms). If no other worklog process is running, delete this directory and retry.`);
       }
       await new Promise((r) => setTimeout(r, 30));
     }
@@ -74,7 +76,7 @@ export function newTicket(key) {
   };
 }
 
-function writeAtomic(filePath, content) {
+export function writeAtomic(filePath, content) {
   const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, filePath);

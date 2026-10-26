@@ -44,8 +44,35 @@ export function loadConfig() {
     fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
     return structuredClone(DEFAULT_CONFIG);
   }
-  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  return { ...structuredClone(DEFAULT_CONFIG), ...raw };
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (e) {
+    const msg = `Could not parse ${configPath} as JSON: ${e.message}\nFix the file or delete it to regenerate the default.`;
+    const err = new Error(msg);
+    err.code = 'WORKLOG_CONFIG_INVALID';
+    throw err;
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${configPath} must contain a JSON object at the top level.`);
+  }
+  return mergeConfig(structuredClone(DEFAULT_CONFIG), raw);
+}
+
+function mergeConfig(base, override) {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(override)) {
+    if (v === null || v === undefined) continue;
+    if (
+      typeof v === 'object' && !Array.isArray(v) &&
+      typeof base[k] === 'object' && !Array.isArray(base[k]) && base[k] !== null
+    ) {
+      out[k] = mergeConfig(base[k], v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 export function saveConfig(cfg) {

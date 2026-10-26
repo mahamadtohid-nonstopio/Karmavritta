@@ -1,79 +1,48 @@
 # worklog-claude
 
-A Claude Code plugin that builds **one record per ticket, automatically**.
-Captures commits, PRs and docs across every git repo and docs folder you point
-it at, and groups them by ticket key — so recalling "what did I do on
-ESIN-2742, and where is the doc?" takes seconds instead of minutes.
+A Claude Code plugin + CLI that builds **one record per ticket, automatically**
+from your git commits and docs. Point it at any repo and docs folder; it scans
+for `ESIN-123` / `PROJ-456` / `OPP-7` style keys and groups everything by ticket.
 
-Works with **any** ticket-key prefix matching `[A-Z][A-Z0-9]+-\d+`
-(ESIN, OPP, PROJ, FOO, …). Point it at a new project tomorrow and it just
-works — nothing is hardcoded.
-
-Status: **Phase 1 (MVP)** — store, backfill from git + docs, terminal view.
-Phases 2–4 (dashboard, hooks, Jira/ADO sync, RCA) are specced in the PRD and
-will land incrementally.
+- Zero runtime dependencies. Pure Node (≥ 18). Works on Windows, macOS, Linux.
+- Dynamic ticket prefixes — the regex is `[A-Z][A-Z0-9]+-\d+`. ESIN, OPP, PROJ,
+  FOO all work with no code change. Set `keyPrefixes` to lock it down if you want.
+- Scales to tens of thousands of tickets via a batched writer + `index.json` cache
+  + incremental git sync + mtime-cached docs scan.
+- `/worklog` slash command inside Claude Code, or `worklog` CLI from any shell.
 
 ---
 
-## What this does
+## 1. Install
 
-- **Scans every git repo you list** and pulls commits whose message or branch
-  mentions a ticket key.
-- **Scans your docs folders** for markdown files and links them by ticket key
-  (both from the filename and from the first `#` heading).
-- **Groups everything by ticket** in `~/.worklog/tickets/<KEY>.json` — one
-  readable, diffable JSON file per ticket.
-- **Multi-key items go everywhere.** A doc named
-  `ESIN-2725-ESIN-2742-review.md` is linked under both tickets.
-- **Keyless items** (commits with no ticket in message or branch) go to an
-  `_unassigned` bucket — nothing is silently dropped.
-- **Deduplicates** on commit SHA, PR id and absolute doc path, so you can
-  rerun the backfill as many times as you want.
-- **Dynamic ticket prefixes** — leave `keyPrefixes: []` in the config and
-  every `PROJ-123` style key is captured, no matter the project.
+### From source (right now)
 
-Inside Claude Code, the `/worklog` slash command gives you a one-key terminal
-view of any ticket.
+```powershell
+cd C:\Vibe-code\worklog-plugin
+npm link            # puts the `worklog` CLI on your PATH
+worklog install     # copies the Claude Code plugin into ~/.claude/plugins/worklog
+```
 
----
+Then **restart Claude Code** once so it picks up the slash command.
 
-## Install
-
-### Option A — from npm (after it's published)
+### From npm (after you publish — see §4)
 
 ```bash
-npm install -g worklog-claude
+npm install -g worklog-claude      # or @yourscope/worklog-claude
 worklog install
 ```
 
-### Option B — from source (dev / before publishing)
-
-```bash
-git clone <this-repo>
-cd worklog-plugin
-npm link           # puts `worklog` on PATH globally
-worklog install    # copies plugin into ~/.claude/plugins/worklog
-```
-
-Either way, two steps:
-1. **`npm install -g` / `npm link`** — puts the `worklog` CLI on your PATH.
-2. **`worklog install`** — copies the Claude Code plugin files into
-   `~/.claude/plugins/worklog/` so the `/worklog` slash command appears
-   inside Claude Code. Restart Claude Code (or `/plugin reload`) once.
-
-Requires **Node.js 18 or newer**.
+Requires **Node ≥ 18** and **git** on PATH.
 
 ---
 
-## Run
+## 2. Set it up
 
-### 1. First-time setup
-
-```bash
+```powershell
 worklog init
 ```
 
-Creates `~/.worklog/config.json`. Edit it:
+Opens / creates `~/.worklog/config.json`. Edit it to point at your work:
 
 ```json
 {
@@ -95,209 +64,303 @@ Creates `~/.worklog/config.json`. Edit it:
 }
 ```
 
-- `repos` — absolute paths to git working trees to scan.
-- `docsFolders` — folders to scan recursively for `*.md` files.
-- `keyPrefixes` — **leave empty to capture every `PROJ-123` style key**, or
-  set e.g. `["ESIN","OPP"]` to restrict. This is the dynamic bit — switching
-  to a new project is zero code change.
-- `authors` — git author filter (OR'd across names and emails) so you only
-  ingest your own commits.
+| Field | What it does |
+| --- | --- |
+| `repos` | Absolute paths to git repos to scan |
+| `docsFolders` | Folders scanned recursively for `*.md` files |
+| `keyPrefixes` | **Leave empty to accept any `PROJ-123` style key** — switching projects needs zero code change. Set `["ESIN","OPP"]` to restrict. |
+| `authors` | Filters git log to just your commits (OR'd across names and emails) |
 
-### 2. Build history
+Then:
 
-```bash
+```powershell
 worklog backfill --since 2026-01-01
 ```
 
-Scans every configured repo and docs folder, writes one JSON per ticket to
-`~/.worklog/tickets/`. Idempotent — re-run as often as you like.
+That's the one-time full scan. Everything after that is incremental.
 
-### 3. Query
+---
 
-```bash
-worklog list                 # every ticket, newest activity first
-worklog ESIN-4349            # ticket summary (commits, docs, PRs, findings)
-worklog ticket ESIN-4349     # same as above
-worklog _unassigned          # commits/docs with no ticket key found
-worklog sync                 # incremental re-scan
-worklog config               # print current config + paths
-worklog help
+## 3. Use it
+
+### Day-to-day queries
+
+```powershell
+worklog list                        # all tickets, newest activity first
+worklog recent --days 7             # what you touched this week
+worklog month 2026-08               # tickets active in August
+worklog ESIN-4349                   # ticket detail (commits, docs, findings, RCA)
+worklog search deadlock             # grep titles, commit msgs, doc names, findings
+worklog stats                       # overall counts
+worklog _unassigned                 # commits/docs with no key found
 ```
 
-### 4. Inside Claude Code
+### Keeping it current
 
-Once `worklog install` is done and Claude Code is restarted, the `/worklog`
-slash command is available:
+```powershell
+worklog sync                        # incremental re-scan (seconds, not minutes)
+worklog backfill --since 2026-10-01 # explicit window override
+```
+
+### Logging findings as you investigate
+
+```powershell
+worklog note --ticket ESIN-4349 --kind ruled-out "transactionscope was not the cause"
+worklog note --ticket ESIN-4349 --kind finding   "retry queue drains on process restart"
+```
+
+Kinds: `finding | hypothesis | ruled-out | decision | note`.
+
+### Opening the ticket's doc
+
+```powershell
+worklog open ESIN-4349   # opens the newest linked .md in VS Code
+```
+
+### JSON mode (for scripts and Claude)
+
+```powershell
+worklog list     --json
+worklog ESIN-4349 --json
+worklog recent  --days 7 --json
+worklog search  deadlock --json
+worklog stats   --json
+```
+
+### Inside Claude Code
+
+Once the plugin is installed and Claude Code is restarted, type:
 
 ```
 /worklog ESIN-4349
-/worklog list
+/worklog recent --days 7
+/worklog search deadlock
 /worklog sync
-/worklog backfill --since 2026-01-01
-/worklog config
 ```
 
-The slash command just shells out to the `worklog` CLI.
+The slash command just shells out to the `worklog` CLI; output is shown inline.
 
-### Example output
+### Full command reference
 
-```
-$ worklog ESIN-4349
+| Command | Purpose |
+| --- | --- |
+| `worklog install` | Copy plugin to `~/.claude/plugins/worklog` |
+| `worklog init` | Create default config |
+| `worklog config` | Print config and data paths |
+| `worklog backfill [--since DATE]` | Full / windowed scan |
+| `worklog sync` | Incremental re-scan |
+| `worklog list` | All tickets, newest activity first |
+| `worklog recent [--days N]` | Tickets touched in last N days (default 7) |
+| `worklog month YYYY-MM` | Tickets active in that month |
+| `worklog search <text>` | Grep across titles, commits, docs, findings |
+| `worklog stats` | Counts (tickets, commits, docs, date range) |
+| `worklog <KEY>` or `worklog ticket <KEY>` | Ticket detail |
+| `worklog note --ticket <KEY> --kind <k> "<text>"` | Add a finding |
+| `worklog open <KEY>` | Open newest linked doc in VS Code |
+| `worklog help` | Help text |
 
-ESIN-4349 — Log order-summary fallback as Warning
--------------------------------------------------
-Status:   In QA
-Active:   2026-10-20 → 2026-10-24  (3 days)
-Repos:    PE-DryLabAPI
-Branches: ESIN-4349/qa
-Jira:     https://<site>.atlassian.net/browse/ESIN-4349
-
-Commits (2):
-  9fa0c855e  2026-10-23  [PE-DryLabAPI]  [ESIN-4349] Log order-summary fallback as Warning
-  5a2b1c0e3  2026-10-22  [PE-DryLabAPI]  [ESIN-4349] Add fallback path
-
-Docs (1):
-  C:\Projects\docs\ESIN-4349-backend-changes.md
-```
+All read commands (`list`, `month`, `recent`, `search`, `stats`, `ticket`, `<KEY>`) support `--json`.
 
 ---
 
-## Where things live
+## 4. Publish to npm
 
-| What                      | Where                                    |
-| ------------------------- | ---------------------------------------- |
-| CLI config                | `~/.worklog/config.json`                 |
-| Ticket records            | `~/.worklog/tickets/<KEY>.json`          |
-| Unassigned bucket         | `~/.worklog/tickets/_unassigned.json`    |
-| Plugin install directory  | `~/.claude/plugins/worklog/`             |
+So that you (or anyone) can `npm install -g` it later from any machine.
 
-Override the data directory for testing with `WORKLOG_DIR=/tmp/wl`.
+### 4.1 Decide the package name
 
----
+Scoped is safest — the name is always available under your scope:
 
-## Publish to npm
-
-### 1. Pick a package name
-
-Scoped is recommended because the name is always available under your scope:
-
-```bash
-npm view worklog-claude            # check if the unscoped name is free
+```powershell
+npm view @nonstopio/worklog-claude     # should 404 (not taken)
 ```
 
-If taken, use `@your-scope/worklog-claude` and update `package.json`:
+Edit `package.json` → set `"name": "@nonstopio/worklog-claude"` (or keep
+unscoped if `worklog-claude` is free).
+
+### 4.2 Fill in metadata
 
 ```json
-"name": "@nonstopio/worklog-claude"
+{
+  "name": "@nonstopio/worklog-claude",
+  "version": "0.1.0",
+  "description": "...",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mahamadtohid-nonstopio/Karmavritta.git"
+  },
+  "homepage": "https://github.com/mahamadtohid-nonstopio/Karmavritta#readme",
+  "bugs": { "url": "https://github.com/mahamadtohid-nonstopio/Karmavritta/issues" },
+  "author": "Mahamadtohid Naikwadi <mahamadtohid.naikwadi@nonstopio.com>",
+  "license": "MIT"
+}
 ```
 
-### 2. One-time npm account setup
+### 4.3 One-time npm account setup
 
-```bash
-npm adduser        # or: npm login
-npm whoami         # confirm you're signed in
+```powershell
+npm adduser                 # or: npm login
+npm whoami                  # confirm who you are
 ```
 
-Enable 2FA on npmjs.com — npm blocks publish on accounts without it.
+Enable **2FA** on https://www.npmjs.com/settings/<you>/profile — npm blocks
+publish on new accounts without it.
 
-### 3. Fill in metadata
+### 4.4 Pre-publish sanity check
 
-Add to `package.json`:
-
-```json
-"repository": {
-  "type": "git",
-  "url": "https://github.com/<you>/worklog-plugin.git"
-},
-"homepage": "https://github.com/<you>/worklog-plugin#readme",
-"bugs": {
-  "url": "https://github.com/<you>/worklog-plugin/issues"
-},
-"author": "Mahamadtohid Naikwadi <mahamadtohid.naikwadi@nonstopio.com>"
+```powershell
+npm test                    # should say "pass 36, fail 0"
+npm pack --dry-run          # list every file that will ship
 ```
 
-### 4. Pre-publish sanity check
+The `npm pack --dry-run` output should include **only**:
 
-```bash
-npm test            # all 21 tests should pass
-npm pack --dry-run  # prints every file that will be shipped
+```
+bin/worklog.mjs
+scripts/cli.mjs
+scripts/install.mjs
+scripts/sync.mjs
+scripts/lib/config.mjs
+scripts/lib/index.mjs
+scripts/lib/keys.mjs
+scripts/lib/store.mjs
+commands/worklog.md
+skills/worklog/SKILL.md
+.claude-plugin/plugin.json
+README.md
+package.json
 ```
 
-Confirm you see `bin/`, `scripts/`, `commands/`, `skills/`, `.claude-plugin/`,
-`README.md`, `package.json` and nothing else (no `test/`, no `node_modules/`).
+If `test/` or `node_modules/` sneak in, tighten the `files` field in
+`package.json` or add a `.npmignore`.
 
-### 5. Publish
+### 4.5 Publish
 
-Unscoped:
-```bash
+```powershell
+# Unscoped
 npm publish
-```
 
-Scoped — needs `--access public` the first time:
-```bash
+# Scoped (first publish needs --access public)
 npm publish --access public
 ```
 
-Appears at `https://www.npmjs.com/package/<name>` within ~30 seconds.
+Appears at `https://www.npmjs.com/package/<name>` within ~30s.
 
-### 6. Verify from a clean machine
+### 4.6 Install from anywhere later
 
-```bash
-npm install -g <name>
-worklog --help
+```powershell
+npm install -g @nonstopio/worklog-claude
 worklog install
+worklog init
+# ...edit config, backfill
 ```
 
-### 7. Publishing updates
+### 4.7 Publishing updates
 
-```bash
-npm version patch     # 0.1.0 -> 0.1.1  (bug fixes)
-npm version minor     # 0.1.0 -> 0.2.0  (new feature, back-compat)
-npm version major     # 0.1.0 -> 1.0.0  (breaking)
+```powershell
+npm version patch   # 0.1.0 → 0.1.1  bug fix
+npm version minor   # 0.1.0 → 0.2.0  new feature
+npm version major   # 0.1.0 → 1.0.0  breaking
 npm publish
 ```
 
-`npm version` bumps `package.json` and (if the folder is a git repo) tags the
-commit automatically.
+`npm version` edits `package.json` and tags the commit (if the folder is a git repo).
 
-### Common gotchas
+### 4.8 Common gotchas
 
-| Error / symptom | Fix |
+| Symptom | Fix |
 | --- | --- |
-| `402 Payment Required` on a scoped publish | Add `--access public` |
-| `403 Forbidden` | Name is taken by someone else, or you're not logged in — `npm whoami` |
+| `402 Payment Required` on scoped publish | Add `--access public` |
+| `403 Forbidden` | Name is taken, or you're not logged in — `npm whoami` |
 | `E2FA` | Enable 2FA on npmjs.com, then `npm login` again |
-| `bad option: --test` | Node too old — `nvm use 22` (needs ≥ 18) |
+| `bad option: --test` | Node too old. Use Node ≥ 18 (`nvm use 22`) |
 | `worklog: command not found` after `npm link` | On Windows, run PowerShell as admin and re-link |
 
 ---
 
-## Uninstall
+## 5. Smoke test before you publish
 
-```bash
-npm unlink -g worklog-claude                      # remove the CLI
-rm -rf ~/.claude/plugins/worklog                  # remove the Claude plugin
-rm -rf ~/.worklog                                 # remove your data (optional)
+Run these in order. Each one either prints something sensible or exits with a
+clear error. If anything surprises you, pause.
+
+```powershell
+# 1. Config loads
+worklog config
+
+# 2. Full backfill works
+worklog backfill --since 2026-01-01
+
+# 3. Queries are fast and show real data
+worklog list
+worklog recent --days 7
+worklog stats
+worklog search deadlock          # try a word you know appears in your repos
+
+# 4. Ticket detail works
+worklog <KEY-YOU-SAW-IN-LIST>
+
+# 5. Incremental sync is incremental
+worklog sync                      # should say "scanning <repo> since <date>..."
+
+# 6. Note persists
+worklog note --ticket <KEY> --kind finding "test from smoke run"
+worklog <KEY>                     # confirm it shows in Findings
+
+# 7. JSON mode is parseable
+worklog list --json | ConvertFrom-Json | Select -First 2
+
+# 8. Install flow works end-to-end
+worklog install
+# → restart Claude Code → try /worklog <KEY> inside a chat
 ```
 
-On Windows PowerShell:
+Nuclear-option clean-slate test (optional, best right before publish):
+
 ```powershell
 npm unlink -g worklog-claude
-Remove-Item -Recurse C:\Users\<you>\.claude\plugins\worklog
-Remove-Item -Recurse C:\Users\<you>\.worklog
+Remove-Item -Recurse C:\Users\nonstop\.claude\plugins\worklog
+Remove-Item -Recurse C:\Users\nonstop\.worklog
+
+cd C:\Vibe-code\worklog-plugin
+npm link
+worklog install
+worklog init
+# fill config, backfill, verify queries
+```
+
+If this works, strangers running `npm install -g <pkg>` will have the same experience.
+
+---
+
+## 6. Where things live
+
+| What | Path |
+| --- | --- |
+| CLI config | `~/.worklog/config.json` |
+| Ticket records | `~/.worklog/tickets/<KEY>.json` |
+| Unassigned bucket | `~/.worklog/tickets/_unassigned.json` |
+| Index cache | `~/.worklog/index.json` |
+| Plugin install | `~/.claude/plugins/worklog/` |
+
+Override the data dir for testing with `WORKLOG_DIR=/tmp/sandbox`.
+
+---
+
+## 7. Uninstall
+
+```powershell
+npm unlink -g worklog-claude                           # or: npm uninstall -g worklog-claude
+Remove-Item -Recurse C:\Users\nonstop\.claude\plugins\worklog
+Remove-Item -Recurse C:\Users\nonstop\.worklog         # drops your data (optional)
 ```
 
 ---
 
-## Development
+## 8. Development
 
-```bash
-npm test              # node --test, no deps
+```powershell
+npm test              # 36 tests, no deps
 ```
-
-- Pure Node (≥ 18), **zero runtime dependencies**.
-- Works on Windows, macOS and Linux paths.
-- Store is file-locked (mkdir-based) and writes atomically (temp file + rename).
 
 ### Project layout
 
@@ -310,37 +373,37 @@ worklog-plugin/
 ├── scripts/
 │   ├── cli.mjs                # command dispatcher
 │   ├── install.mjs            # `worklog install` logic
-│   ├── sync.mjs               # git log + docs scan
+│   ├── sync.mjs               # git log + docs scan (batched, incremental)
 │   └── lib/
-│       ├── config.mjs         # ~/.worklog/config.json loader
+│       ├── config.mjs         # config loader with deep merge
+│       ├── index.mjs          # index.json builder + lastSync tracker
 │       ├── keys.mjs           # ticket-key regex + prefix filter
 │       └── store.mjs          # read/write ticket JSON, lock, atomic write
-├── test/
-│   ├── keys.test.mjs
-│   └── store.test.mjs
+├── test/                      # 36 tests, pure node:test
 ├── package.json
 └── README.md
 ```
 
+### Design choices worth knowing
+
+- **One JSON per ticket, not a database.** Diffable, human-readable, trivially editable.
+- **File lock = mkdir.** Portable and atomic on every OS. Stale-lock recovery at 15s.
+- **Batched upserts.** Sync groups events by ticket key first, so each ticket file is opened/locked exactly once per sync.
+- **Index cache.** `~/.worklog/index.json` holds per-ticket summaries so `list`/`month`/`recent`/`stats` don't open every ticket file. Rebuilt at the end of each sync.
+- **Incremental git log.** `index.json.lastSync[repo]` is passed as `--since=` on the next sync. Explicit `--since` on the CLI overrides.
+- **Mtime-cached docs scan.** `index.json.lastDocsScan` cuts work on huge docs trees.
+
 ---
 
-## Phase 1 scope (this release)
+## 9. Phases (per the PRD)
 
-- [x] Scaffold + config + key extraction + JSON store with lock & atomic write
-- [x] `syncGit` and `syncDocs` with dedupe
-- [x] `/worklog <KEY>` and `worklog list` terminal views
-- [x] `worklog install` to drop the plugin into `~/.claude/plugins`
-- [x] Dynamic ticket prefix (empty `keyPrefixes` = allow any)
-- [x] 21 unit tests covering keys and store
-
-Coming next (per PRD):
-- Phase 2 — self-contained HTML dashboard (month view, ticket detail, search)
-- Phase 3 — hooks + ingest for automatic in-session capture, `/worklog note`
-- Phase 4 — Jira & ADO enrichment, `/worklog rca`, `_unassigned` view
+- [x] **Phase 1** — store, backfill, terminal queries, CLI, install, note, open, JSON mode, incremental sync, index cache
+- [ ] **Phase 2** — self-contained HTML dashboard (month/ticket/search views)
+- [ ] **Phase 3** — Claude Code hooks for automatic in-session capture
+- [ ] **Phase 4** — Jira & Azure DevOps enrichment, `/worklog rca`
 
 ---
 
 ## License
 
 MIT
-"# Karmavritta" 
