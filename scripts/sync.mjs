@@ -1,11 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import * as safety from './lib/safety.mjs';
 import { loadConfig } from './lib/config.mjs';
 import { extractKeys } from './lib/keys.mjs';
 import { upsertTicket, mergeCommit, mergeDoc, readTicket, listTickets, writeAtomic } from './lib/store.mjs';
-import { loadIndex, updateLastSync } from './lib/index.mjs';
-import { getWorklogDir } from './lib/config.mjs';
+import { loadIndex, updateLastSync, getIndexPath } from './lib/index.mjs';
 
 const UNIT_SEP = '\x1f';
 
@@ -14,29 +13,13 @@ function gitLog(repoPath, { since, authorRegex } = {}) {
   const args = ['log', '--all', '--no-merges', `--pretty=format:${fmt}`];
   if (since) args.push(`--since=${since}`);
   if (authorRegex) args.push(`--author=${authorRegex}`, '--regexp-ignore-case');
-  try {
-    return { ok: true, output: execFileSync('git', args, {
-      cwd: repoPath,
-      encoding: 'utf8',
-      maxBuffer: 200 * 1024 * 1024,
-      windowsHide: true
-    }) };
-  } catch (e) {
-    if (e.code === 'ENOENT') {
-      return { ok: false, reason: 'git executable not found on PATH' };
-    }
-    const stderr = (e.stderr || '').toString().trim();
-    return { ok: false, reason: stderr || e.message || 'git log failed' };
-  }
+  const r = safety.runCapture('git', args, { cwd: repoPath, maxBuffer: 200 * 1024 * 1024 });
+  return r.ok ? { ok: true, output: r.stdout } : { ok: false, reason: r.reason };
 }
 
 export function detectGit() {
-  try {
-    const out = execFileSync('git', ['--version'], { encoding: 'utf8', windowsHide: true });
-    return out.trim();
-  } catch (e) {
-    return null;
-  }
+  const r = safety.runCapture('git', ['--version']);
+  return r.ok ? r.stdout.trim() : null;
 }
 
 function parseGitLog(output) {
@@ -235,7 +218,7 @@ function stampDocsScan() {
     generatedAt: new Date().toISOString(), ticketCount: 0, tickets: [], lastSync: {}
   };
   idx.lastDocsScan = new Date().toISOString();
-  writeAtomic(path.join(getWorklogDir(), 'index.json'), JSON.stringify(idx, null, 2));
+  writeAtomic(getIndexPath(), JSON.stringify(idx, null, 2));
 }
 
 function safeReadHead(file, lines) {

@@ -9,8 +9,7 @@ import { readTicket, listTickets, upsertTicket, addFinding } from './lib/store.m
 import { syncGit, syncDocs } from './sync.mjs';
 import { installPlugin } from './install.mjs';
 import { buildIndex, loadIndex } from './lib/index.mjs';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
+import * as safety from './lib/safety.mjs';
 
 export async function main(argv) {
   const [cmd, ...rest] = argv;
@@ -333,7 +332,7 @@ async function addNote(positional, flags) {
   console.log(`✓ ${key}: ${kind} added (${text.slice(0, 60)}${text.length > 60 ? '...' : ''})`);
 }
 
-function openTicket(key) {
+async function openTicket(key) {
   if (!key) {
     console.error('Usage: worklog open <KEY>');
     process.exit(1);
@@ -343,28 +342,8 @@ function openTicket(key) {
   if (!t.docs?.length) { console.error(`${key} has no linked docs.`); process.exit(1); }
 
   const latest = [...t.docs].sort((a, b) => (b.modified || '').localeCompare(a.modified || ''))[0];
-  const docPath = latest.path;
-  console.log(`Opening ${docPath}`);
-
-  // Try VS Code first; fall back to the OS default open.
-  const trySpawn = (cmd, args) => new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: 'ignore', detached: true, shell: process.platform === 'win32' });
-    child.on('error', () => resolve(false));
-    child.unref();
-    setTimeout(() => resolve(true), 50);
-  });
-
-  (async () => {
-    const codeOk = await trySpawn('code', [docPath]);
-    if (codeOk) return;
-    if (process.platform === 'win32') {
-      await trySpawn('cmd', ['/c', 'start', '""', docPath]);
-    } else if (process.platform === 'darwin') {
-      await trySpawn('open', [docPath]);
-    } else {
-      await trySpawn('xdg-open', [docPath]);
-    }
-  })();
+  console.log(`Opening ${latest.path}`);
+  await safety.openExternal(latest.path);
 }
 
 function showStats({ json } = {}) {

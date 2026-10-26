@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import * as safety from './safety.mjs';
 import { getTicketsDir, ensureWorklogDir } from './config.mjs';
 
 function lockDir() {
@@ -11,29 +13,24 @@ const STALE_LOCK_MS = 15_000;
 async function acquireLock(timeoutMs = 5000) {
   const start = Date.now();
   while (true) {
+    if (safety.tryMkdirExclusive(lockDir())) return;
+    // Opportunistic stale-lock recovery on every retry, not only at timeout.
     try {
-      fs.mkdirSync(lockDir());
-      return;
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      // Opportunistic stale-lock recovery on every retry, not only at timeout.
-      try {
-        const stat = fs.statSync(lockDir());
-        if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
-          fs.rmdirSync(lockDir());
-          continue;
-        }
-      } catch {}
-      if (Date.now() - start > timeoutMs) {
-        throw new Error(`Could not acquire worklog lock at ${lockDir()} (held for > ${timeoutMs}ms). If no other worklog process is running, delete this directory and retry.`);
+      const stat = fs.statSync(lockDir());
+      if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+        safety.removeDirIfEmpty(lockDir());
+        continue;
       }
-      await new Promise((r) => setTimeout(r, 30));
+    } catch {}
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`Could not acquire worklog lock at ${lockDir()} (held for > ${timeoutMs}ms). If no other worklog process is running, delete this directory and retry.`);
     }
+    await new Promise((r) => setTimeout(r, 30));
   }
 }
 
 function releaseLock() {
-  try { fs.rmdirSync(lockDir()); } catch {}
+  safety.removeDirIfEmpty(lockDir());
 }
 
 export function ticketPath(key) {
@@ -71,24 +68,35 @@ export function newTicket(key) {
     prs: [],
     docs: [],
     findings: [],
+    decisions: [],
+    artifacts: [],
+    files: [],
+    sessions: [],
     rca: null,
     notes: ''
   };
 }
 
+/** Older ticket files predate the capture fields; fill them in on read-modify. */
+function ensureShape(t) {
+  const blank = newTicket(t.key);
+  for (const [k, v] of Object.entries(blank)) {
+    if (t[k] === undefined) t[k] = Array.isArray(v) ? [] : v;
+  }
+  return t;
+}
+
 export function writeAtomic(filePath, content) {
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, filePath);
+  return safety.writeFileAtomic(filePath, content);
 }
 
 export async function upsertTicket(key, mutator) {
   ensureWorklogDir();
   await acquireLock();
   try {
-    const existing = readTicket(key) || newTicket(key);
+    const existing = ensureShape(readTicket(key) || newTicket(key));
     const next = mutator(existing) || existing;
-    writeAtomic(ticketPath(key), JSON.stringify(next, null, 2));
+    safety.writeFileAtomic(ticketPath(key), JSON.stringify(next, null, 2));
     return next;
   } finally {
     releaseLock();
@@ -105,6 +113,25 @@ export function touchDate(ticket, dateStr) {
   }
   if (!ticket.firstActive || d < ticket.firstActive) ticket.firstActive = d;
   if (!ticket.lastActive || d > ticket.lastActive) ticket.lastActive = d;
+}
+
+/**
+ * Content-addressed id. Re-running the tick over the same raw events must
+ * produce the same ids, which is what keeps the merge idempotent.
+ */
+export function stableId(kind, ...parts) {
+  const norm = parts
+    .map((p) => String(p ?? '').toLowerCase().replace(/\s+/g, ' ').trim())
+    .join('');
+  return `${kind}_${createHash('sha1').update(norm).digest('hex').slice(0, 12)}`;
+}
+
+/** Insert-or-update by `id`, preserving fields the caller did not supply. */
+export function mergeById(list, entry) {
+  const i = list.findIndex((x) => x.id === entry.id);
+  if (i === -1) { list.push(entry); return true; }
+  list[i] = { ...list[i], ...entry };
+  return false;
 }
 
 export function mergeCommit(ticket, commit) {
@@ -137,6 +164,42 @@ export function mergePR(ticket, pr) {
 }
 
 export function addFinding(ticket, finding) {
-  ticket.findings.push(finding);
+  const entry = { id: finding.id || stableId('f', finding.kind, finding.text), ...finding };
+  mergeById(ticket.findings, entry);
   touchDate(ticket, finding.date);
+  return entry;
+}
+
+export function addDecision(ticket, decision) {
+  const entry = { id: decision.id || stableId('d', decision.text), ...decision };
+  mergeById(ticket.decisions, entry);
+  touchDate(ticket, decision.date);
+  return entry;
+}
+
+/** A saved request, query or command worth replaying later. */
+export function addArtifact(ticket, artifact) {
+  const entry = { id: artifact.id || stableId('a', artifact.kind, artifact.body), ...artifact };
+  mergeById(ticket.artifacts, entry);
+  touchDate(ticket, artifact.date);
+  return entry;
+}
+
+export function addFileTouch(ticket, file) {
+  const entry = { id: stableId('p', file.path), ...file };
+  const existing = ticket.files.find((x) => x.id === entry.id);
+  if (existing) {
+    existing.count = (existing.count || 1) + (file.count || 1);
+    if (file.date && (!existing.lastSeen || file.date > existing.lastSeen)) existing.lastSeen = file.date;
+  } else {
+    ticket.files.push({ ...entry, count: file.count || 1, lastSeen: file.date || null });
+  }
+  touchDate(ticket, file.date);
+}
+
+export function addSession(ticket, session) {
+  const entry = { id: session.id || stableId('s', session.sessionId, session.day), ...session };
+  mergeById(ticket.sessions, entry);
+  touchDate(ticket, session.day);
+  return entry;
 }

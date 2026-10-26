@@ -1,46 +1,38 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import * as safety from './lib/safety.mjs';
+import { getPluginInstallDir, getRuntimeDir } from './lib/paths.mjs';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PAYLOAD = ['.claude-plugin', 'commands', 'hooks', 'scripts', 'skills'];
 
 export async function installPlugin() {
-  const target = path.join(os.homedir(), '.claude', 'plugins', 'worklog');
-  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const target = getPluginInstallDir();
+  copyPayload(target);
 
-  if (fs.existsSync(target)) {
-    console.log(`Removing existing install at ${target}`);
-    fs.rmSync(target, { recursive: true, force: true });
-  }
-
-  fs.mkdirSync(target, { recursive: true });
-  for (const dir of ['.claude-plugin', 'commands', 'scripts', 'skills']) {
-    const src = path.join(PACKAGE_ROOT, dir);
-    if (!fs.existsSync(src)) continue;
-    copyRecursive(src, path.join(target, dir));
-  }
+  // A second copy under the data home. The scheduled tick points here, so a
+  // plugin upgrade that relocates files cannot leave a dangling scheduled task.
+  const runtime = getRuntimeDir();
+  copyPayload(runtime);
 
   console.log(`Installed Worklog plugin at: ${target}`);
+  console.log(`Runtime copy for the tick:   ${runtime}`);
   console.log('');
   console.log('Next steps:');
   console.log('  1. Restart Claude Code (or /plugin reload) so it picks the plugin up.');
-  console.log('  2. Run `worklog init` to create ~/.worklog/config.json.');
-  console.log('  3. Edit the config: add your repos and docsFolders.');
-  console.log('     Leave `keyPrefixes` empty to capture every PROJ-123 style key,');
-  console.log('     or set e.g. ["ESIN","OPP"] to restrict.');
-  console.log('  4. Run `worklog backfill --since 2026-01-01` to build history.');
-  console.log('  5. Try `/worklog <KEY>` inside Claude Code.');
+  console.log('  2. Run `worklog setup` to create the data home and schedule the tick.');
+  console.log('  3. Run `worklog doctor` to confirm hooks, tick and runtime are healthy.');
+  console.log('  4. Optionally add repos/docsFolders to the config and run `worklog backfill`.');
 }
 
-function copyRecursive(src, dst) {
-  const stat = fs.statSync(src);
-  if (stat.isDirectory()) {
-    fs.mkdirSync(dst, { recursive: true });
-    for (const name of fs.readdirSync(src)) {
-      copyRecursive(path.join(src, name), path.join(dst, name));
-    }
-  } else {
-    fs.copyFileSync(src, dst);
+function copyPayload(target) {
+  safety.mkdirp(path.dirname(target));
+  if (fs.existsSync(target)) safety.removePath(target, { recursive: true });
+  safety.mkdirp(target);
+  for (const dir of PAYLOAD) {
+    const src = path.join(PACKAGE_ROOT, dir);
+    if (!fs.existsSync(src)) continue;
+    safety.copyTree(src, path.join(target, dir));
   }
 }

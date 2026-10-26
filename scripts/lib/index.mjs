@@ -1,11 +1,9 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { getWorklogDir, ensureWorklogDir } from './config.mjs';
+import * as safety from './safety.mjs';
+import { ensureWorklogDir, getIndexPath } from './config.mjs';
 import { listTickets, readTicket } from './store.mjs';
 
-export function getIndexPath() {
-  return path.join(getWorklogDir(), 'index.json');
-}
+export { getIndexPath };
 
 export function buildIndex() {
   ensureWorklogDir();
@@ -14,17 +12,19 @@ export function buildIndex() {
     const t = readTicket(key);
     if (!t) continue;
     rows.push({
-      key:          t.key,
-      title:        t.title || '',
-      status:       t.status || '',
-      firstActive:  t.firstActive || null,
-      lastActive:   t.lastActive || null,
-      activeDates:  t.activeDates || [],
-      commitCount:  t.commits?.length || 0,
-      docCount:     t.docs?.length || 0,
-      prCount:      t.prs?.length || 0,
-      findingCount: t.findings?.length || 0,
-      hasRca:       !!t.rca
+      key:           t.key,
+      title:         t.title || '',
+      status:        t.status || '',
+      firstActive:   t.firstActive || null,
+      lastActive:    t.lastActive || null,
+      activeDates:   t.activeDates || [],
+      commitCount:   t.commits?.length   || 0,
+      docCount:      t.docs?.length      || 0,
+      prCount:       t.prs?.length       || 0,
+      findingCount:  t.findings?.length  || 0,
+      decisionCount: t.decisions?.length || 0,
+      sessionCount:  t.sessions?.length  || 0,
+      hasRca:        !!t.rca
     });
   }
   rows.sort((a, b) => (b.lastActive || '').localeCompare(a.lastActive || ''));
@@ -36,13 +36,12 @@ export function buildIndex() {
     lastSync: {}  // repoName -> ISO date, populated by sync.mjs for incremental
   };
 
-  // Preserve previously stored lastSync so incremental sync keeps working.
+  // Preserve previously stored sync stamps so incremental scans keep working.
   const existing = loadIndex({ silent: true });
   if (existing?.lastSync) index.lastSync = existing.lastSync;
+  if (existing?.lastDocsScan) index.lastDocsScan = existing.lastDocsScan;
 
-  const tmp = `${getIndexPath()}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(index, null, 2));
-  fs.renameSync(tmp, getIndexPath());
+  safety.writeFileAtomic(getIndexPath(), JSON.stringify(index, null, 2));
   return index;
 }
 
@@ -63,7 +62,5 @@ export function updateLastSync(repoName, iso) {
   };
   idx.lastSync = idx.lastSync || {};
   idx.lastSync[repoName] = iso;
-  const tmp = `${getIndexPath()}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(idx, null, 2));
-  fs.renameSync(tmp, getIndexPath());
+  safety.writeFileAtomic(getIndexPath(), JSON.stringify(idx, null, 2));
 }
