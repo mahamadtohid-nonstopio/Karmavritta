@@ -8,7 +8,7 @@ import {
 import { isValidKey } from './lib/keys.mjs';
 import { readTicket, listTickets, upsertTicket, addFinding } from './lib/store.mjs';
 import { syncGit, syncDocs } from './sync.mjs';
-import { installPlugin } from './install.mjs';
+import { installPlugin, refreshRuntime } from './install.mjs';
 import { buildIndex, loadIndex } from './lib/index.mjs';
 import * as safety from './lib/safety.mjs';
 import * as configstore from './lib/configstore.mjs';
@@ -16,6 +16,9 @@ import * as scheduler from './lib/scheduler.mjs';
 import { diagnose, formatReport } from './lib/doctor.mjs';
 import { runTick, readDailyNote, readItemNote } from './lib/agent.mjs';
 import { summary as spendSummary } from './lib/budget.mjs';
+import { periodDays, activitySheet, sheetToCsv, sheetToText, exportItem } from './lib/report.mjs';
+import { getExportsDir } from './lib/paths.mjs';
+import path from 'node:path';
 
 export async function main(argv) {
   const [cmd, ...rest] = argv;
@@ -46,6 +49,9 @@ export async function main(argv) {
     case 'stats':        return showStats({ json });
     case 'note':         return addNote(positional, flags);
     case 'open':         return openTicket(positional[0]);
+    case 'week':         return showSheet('week', flags, { json });
+    case 'timesheet':    return showSheet(flags.month ? 'month' : 'week', flags, { json });
+    case 'export':       return exportCmd(positional[0], flags);
     case 'ticket':
     case 'show':         return showTicket(positional[0], { json });
     case 'help':
@@ -94,8 +100,12 @@ Backfill and query:
   worklog search <text>             Grep across titles, commit messages, doc names, findings
   worklog stats                     Overall counts (tickets, commits, docs)
   worklog note --ticket <KEY> "..." Append a finding (--kind finding|hypothesis|ruled-out|decision|note)
+  worklog week [--date D] [--csv]   Activity per item per day for the ISO week (events, not hours)
+  worklog timesheet [--month] ...   Same sheet; --month for the calendar month
+  worklog export <KEY> [--format md|html] [--out FILE]
+                                    Write a public-redacted copy of the item note to exports/
   worklog open <KEY>                Open the ticket's most recent doc in VS Code
-  worklog <KEY>                     Show a ticket summary (e.g. worklog ESIN-4349)
+  worklog <KEY>                     Show a ticket summary (e.g. worklog DEMO-4349)
   worklog ticket <KEY>              Same as above
   worklog help                      Show this help
 
@@ -106,7 +116,7 @@ Config:  ${getConfigPath()}
 Data:    ${getWorklogDir()}
 
 The ticket-key regex is  \\b[A-Z][A-Z0-9]+-\\d+\\b  . Leave keyPrefixes empty
-in the config to accept any prefix, or set it to e.g. ["ESIN","OPP"].
+in the config to accept any prefix, or set it to e.g. ["DEMO","TASK"].
 `);
 }
 
@@ -192,6 +202,8 @@ async function setup(flags) {
   loadConfig();
   console.log(`Data home: ${getWorklogDir()}`);
   console.log(`Config:    ${getConfigPath()}`);
+
+  console.log(`Runtime:   ${refreshRuntime()}  (the scheduled tick runs from this copy)`);
 
   const interval = Number(flags.interval ?? 5);
   const s = scheduler.install(interval);
@@ -563,4 +575,42 @@ function showStats({ json } = {}) {
     console.log(`Active range:      ${dates[0]} → ${dates.at(-1)}  (${dates.length} day${dates.length === 1 ? '' : 's'})`);
   }
   console.log('');
+}
+
+function showSheet(period, flags, { json } = {}) {
+  const day = typeof flags.date === 'string' ? flags.date : new Date().toISOString().slice(0, 10);
+  let days;
+  try { days = periodDays(day, period); } catch (e) {
+    console.error(`${e.message}
+Usage: worklog ${period === 'month' ? 'timesheet --month' : 'week'} [--date YYYY-MM-DD] [--csv] [--json]`);
+    process.exit(1);
+  }
+  const tickets = listTickets().map((k) => readTicket(k)).filter(Boolean);
+  const sheet = activitySheet(tickets, days);
+  if (json) { console.log(JSON.stringify({ period, unit: 'events', ...sheet }, null, 2)); return; }
+  if (flags.csv) { console.log(sheetToCsv(sheet)); return; }
+  console.log(sheetToText(sheet));
+}
+
+async function exportCmd(key, flags) {
+  if (!key) { console.error('Usage: worklog export <KEY> [--format md|html] [--out FILE]'); process.exit(1); }
+  const t = readTicket(key);
+  if (!t) { console.error(`No record for ${key}.`); process.exit(1); }
+  const format = typeof flags.format === 'string' ? flags.format : 'md';
+  const today = new Date().toISOString().slice(0, 10);
+  let result;
+  try { result = exportItem(t, loadConfig(), { format, exportedOn: today }); } catch (e) {
+    console.error(e.message); process.exit(1);
+  }
+  const target = typeof flags.out === 'string'
+    ? path.resolve(flags.out)
+    : path.join(getExportsDir(), `${key}-${today}.${format}`);
+  // safety refuses anything outside the write allowlist (data home, plugin dir, temp).
+  try { safety.writeFileAtomic(target, result.content); } catch (e) {
+    console.error(`Not written: ${e.message}`); process.exit(1);
+  }
+  console.log(`✓ exported ${key} → ${target}`);
+  console.log(result.masked.length
+    ? `  masked (public redaction): ${result.masked.join(', ')}`
+    : '  nothing needed masking (public redaction applied)');
 }

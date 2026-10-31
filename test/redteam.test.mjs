@@ -76,7 +76,7 @@ test('redaction is idempotent — masking twice changes nothing', () => {
 
 test('ordinary engineering prose is left intact', () => {
   const prose = [
-    'ESIN-4349 deadlock reproduced on the retry queue.',
+    'DEMO-4349 deadlock reproduced on the retry queue.',
     'Ruled out TransactionScope; see commit 3f98efe and docs/rca.md.',
     'Next: check SqlDependency timeout of 30 seconds.'
   ].join('\n');

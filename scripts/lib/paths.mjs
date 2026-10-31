@@ -13,6 +13,7 @@ export function getTicketsDir()  { return path.join(getWorklogDir(), 'tickets');
 export function getRawDir()      { return path.join(getWorklogDir(), 'raw'); }
 export function getDailyDir()    { return path.join(getWorklogDir(), 'daily'); }
 export function getItemsDir()    { return path.join(getWorklogDir(), 'items'); }
+export function getExportsDir()  { return path.join(getWorklogDir(), 'exports'); }
 export function getLogsDir()     { return path.join(getWorklogDir(), 'logs'); }
 export function getBackupsDir()  { return path.join(getWorklogDir(), 'backups'); }
 export function getStatePath()   { return path.join(getWorklogDir(), 'state.json'); }

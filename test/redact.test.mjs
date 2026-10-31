@@ -30,15 +30,15 @@ test('connection strings lose the password but keep the server', () => {
 });
 
 test('emails are kept in local mode and masked from secrets mode up', () => {
-  const text = 'ping me at tohid@nonstopio.com';
-  assert.ok(redact(text, { mode: 'local' }).includes('tohid@nonstopio.com'));
-  assert.ok(!redact(text, { mode: 'secrets' }).includes('tohid@nonstopio.com'));
+  const text = 'ping me at someone@example.com';
+  assert.ok(redact(text, { mode: 'local' }).includes('someone@example.com'));
+  assert.ok(!redact(text, { mode: 'secrets' }).includes('someone@example.com'));
 });
 
 test('configured names are masked in free prose, not just labelled fields', () => {
-  const text = 'Suraj said the retry queue drains on restart.';
-  const out = redact(text, { mode: 'secrets', names: ['Suraj'] });
-  assert.ok(!out.includes('Suraj'), out);
+  const text = 'Alex said the retry queue drains on restart.';
+  const out = redact(text, { mode: 'secrets', names: ['Alex'] });
+  assert.ok(!out.includes('Alex'), out);
   assert.match(out, /\[REDACTED:name\] said the retry queue/);
 });
 
@@ -56,7 +56,7 @@ test('paths and hosts survive until public mode', () => {
 });
 
 test('ticket keys and git shas are never masked', () => {
-  const text = 'ESIN-4349 fixed in 3f98efe8d1c2b4a5f6e7d8c9b0a1f2e3d4c5b6a7';
+  const text = 'DEMO-4349 fixed in 3f98efe8d1c2b4a5f6e7d8c9b0a1f2e3d4c5b6a7';
   assert.equal(redact(text, { mode: 'public' }), text);
 });
 

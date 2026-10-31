@@ -36,13 +36,13 @@ function syntheticDay() {
   const ev = (payload, when) => captureEvent(payload, { now: when });
   ev({ hook_event_name: 'SessionStart', session_id: 's1', cwd: '/w/repo', source: 'startup' }, at(9));
   ev({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Read', tool_input: { file_path: '/w/repo/a.ts' } }, at(9, 1));
-  ev({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'debug ESIN-4349 token refresh' }, at(9, 2));
+  ev({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'debug DEMO-4349 token refresh' }, at(9, 2));
   ev({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Read', tool_input: { file_path: '/w/repo/b.ts' } }, at(9, 3));
   ev({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Read', tool_input: { file_path: '/w/repo/b.ts' }, tool_response: {} }, at(9, 4));
   ev({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: { error: 'exit 1' } }, at(9, 5));
   ev({ hook_event_name: 'SessionEnd', session_id: 's1', reason: 'clear' }, at(9, 6));
 
-  ev({ hook_event_name: 'UserPromptSubmit', session_id: 's2', prompt: 'now OPP-12 pricing table' }, at(11));
+  ev({ hook_event_name: 'UserPromptSubmit', session_id: 's2', prompt: 'now TASK-12 pricing table' }, at(11));
   ev({ hook_event_name: 'PostToolUse', session_id: 's2', tool_name: 'Edit', tool_input: { file_path: '/w/repo/price.ts' }, tool_response: {} }, at(11, 1));
   ev({ hook_event_name: 'PostToolUse', session_id: 's2', tool_name: 'Edit', tool_input: { file_path: '/w/repo/price.ts' }, tool_response: {} }, at(11, 2));
 }
@@ -59,12 +59,12 @@ test('a synthetic day renders a daily note and one note per work item', async ()
 
   const daily = fs.readFileSync(getDailyNotePath(DAY), 'utf8');
   assert.match(daily, /^# 2026-10-20/);
-  assert.match(daily, /## ESIN-4349/);
-  assert.match(daily, /## OPP-12/);
+  assert.match(daily, /## DEMO-4349/);
+  assert.match(daily, /## TASK-12/);
 
-  assert.ok(fs.existsSync(getItemNotePath('ESIN-4349')));
-  assert.ok(fs.existsSync(getItemNotePath('OPP-12')));
-  assert.match(fs.readFileSync(getItemNotePath('OPP-12'), 'utf8'), /price\.ts/);
+  assert.ok(fs.existsSync(getItemNotePath('DEMO-4349')));
+  assert.ok(fs.existsSync(getItemNotePath('TASK-12')));
+  assert.match(fs.readFileSync(getItemNotePath('TASK-12'), 'utf8'), /price\.ts/);
 });
 
 test('re-running the tick adds no duplicates and rewrites nothing', async () => {
@@ -73,7 +73,7 @@ test('re-running the tick adds no duplicates and rewrites nothing', async () => 
   syntheticDay();
 
   await runTick();
-  const first = readTicket('ESIN-4349');
+  const first = readTicket('DEMO-4349');
   const dailyBefore = fs.readFileSync(getDailyNotePath(DAY), 'utf8');
 
   const second = await runTick();
@@ -84,7 +84,7 @@ test('re-running the tick adds no duplicates and rewrites nothing', async () => 
   assert.deepEqual(forced.days, [DAY]);
   assert.equal(forced.notesWritten, 0, 'identical content must not be rewritten');
 
-  const after = readTicket('ESIN-4349');
+  const after = readTicket('DEMO-4349');
   assert.equal(after.findings.length, first.findings.length);
   assert.equal(after.files.length, first.files.length);
   assert.equal(after.days.length, 1);
@@ -97,7 +97,7 @@ test('file touches accumulate per path rather than per event', async () => {
   syntheticDay();
   await runTick();
 
-  const opp = readTicket('OPP-12');
+  const opp = readTicket('TASK-12');
   assert.equal(opp.files.length, 1);
   assert.equal(opp.files[0].count, 2);
   assert.equal(opp.activeDates.join(), DAY);
@@ -110,7 +110,7 @@ test('a failed tool call is counted and surfaced in the summary', async () => {
   syntheticDay();
   await runTick();
 
-  const t = readTicket('ESIN-4349');
+  const t = readTicket('DEMO-4349');
   const day = t.days[0];
   assert.equal(day.stats.failures, 1);
   assert.equal(day.used, 'deterministic');
@@ -130,7 +130,7 @@ test('new events on a processed day are picked up on the next tick', async () =>
 
   const r = await runTick();
   assert.deepEqual(r.days, [DAY]);
-  const opp = readTicket('OPP-12');
+  const opp = readTicket('TASK-12');
   assert.equal(opp.files.length, 2);
   assert.equal(opp.days.length, 1, 'the day entry is updated, not appended');
 });
@@ -144,7 +144,7 @@ test('state records a fingerprint per day and per key', async () => {
   const state = readState();
   assert.ok(state.lastTick);
   assert.ok(state.days[DAY].fingerprint);
-  assert.deepEqual(Object.keys(state.days[DAY].keys).sort(), ['ESIN-4349', 'OPP-12']);
+  assert.deepEqual(Object.keys(state.days[DAY].keys).sort(), ['DEMO-4349', 'TASK-12']);
 });
 
 test('raw days beyond the retention window are pruned', async () => {
@@ -158,7 +158,7 @@ test('raw days beyond the retention window are pruned', async () => {
     fs.mkdirSync(getRawDayDir(day), { recursive: true });
     fs.writeFileSync(path.join(getRawDayDir(day), 's.jsonl'), `${JSON.stringify({
       v: 1, id: `e_${day}`, ts: `${day}T09:00:00.000Z`, day, session: 's', event: 'UserPromptSubmit',
-      keys: ['ESIN-1'], tool: '', kind: 'userpromptsubmit', summary: 'work on ESIN-1'
+      keys: ['DEMO-1'], tool: '', kind: 'userpromptsubmit', summary: 'work on DEMO-1'
     })}\n`);
   }
 
@@ -172,12 +172,12 @@ test('raw days beyond the retention window are pruned', async () => {
 test('a key established mid-session is applied to the whole session', () => {
   const events = [
     { session: 's1', ts: '1', keys: [], id: 'a' },
-    { session: 's1', ts: '2', keys: ['ESIN-1'], id: 'b' },
+    { session: 's1', ts: '2', keys: ['DEMO-1'], id: 'b' },
     { session: 's1', ts: '3', keys: [], id: 'c' },
     { session: 's2', ts: '4', keys: [], id: 'd' }
   ];
   const out = propagateKeys(events);
-  assert.deepEqual(out.map((e) => e.keys), [['ESIN-1'], ['ESIN-1'], ['ESIN-1'], []]);
+  assert.deepEqual(out.map((e) => e.keys), [['DEMO-1'], ['DEMO-1'], ['DEMO-1'], []]);
 });
 
 test('a later key in the same session takes over from the earlier one', () => {
@@ -218,7 +218,7 @@ test('an empty day renders a note that says so', () => {
 
 test('rendering is pure — the same input gives the same bytes', () => {
   const ticket = {
-    key: 'ESIN-1', title: 'Thing', status: '', repos: ['r'], branches: [], activeDates: ['2026-01-01'],
+    key: 'DEMO-1', title: 'Thing', status: '', repos: ['r'], branches: [], activeDates: ['2026-01-01'],
     firstActive: '2026-01-01', lastActive: '2026-01-01', commits: [], prs: [], docs: [],
     findings: [{ id: 'f1', kind: 'finding', text: 'it leaks', evidence: ['e_1'] }],
     decisions: [], artifacts: [], files: [], sessions: [], days: [], rca: null, notes: ''

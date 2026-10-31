@@ -3,18 +3,18 @@ import assert from 'node:assert/strict';
 import { extractKeys, isValidKey, prefixOf } from '../scripts/lib/keys.mjs';
 
 test('extracts a single key from a commit message', () => {
-  assert.deepEqual(extractKeys('[ESIN-123] fix order summary'), ['ESIN-123']);
+  assert.deepEqual(extractKeys('[DEMO-123] fix order summary'), ['DEMO-123']);
 });
 
 test('extracts multiple distinct keys', () => {
   assert.deepEqual(
-    extractKeys('ESIN-2725-ESIN-2742-PR-55031-review.md'),
-    ['ESIN-2725', 'ESIN-2742', 'PR-55031']
+    extractKeys('DEMO-2725-DEMO-2742-PR-55031-review.md'),
+    ['DEMO-2725', 'DEMO-2742', 'PR-55031']
   );
 });
 
 test('deduplicates the same key', () => {
-  assert.deepEqual(extractKeys('ESIN-123 and ESIN-123 again'), ['ESIN-123']);
+  assert.deepEqual(extractKeys('DEMO-123 and DEMO-123 again'), ['DEMO-123']);
 });
 
 test('returns empty on text with no keys', () => {
@@ -29,20 +29,20 @@ test('returns empty on null/undefined input', () => {
 
 test('filters by allowed prefixes when provided', () => {
   assert.deepEqual(
-    extractKeys('ESIN-1 OPP-2 FOO-3', ['ESIN', 'OPP']),
-    ['ESIN-1', 'OPP-2']
+    extractKeys('DEMO-1 TASK-2 FOO-3', ['DEMO', 'TASK']),
+    ['DEMO-1', 'TASK-2']
   );
 });
 
 test('empty prefix list = allow all (dynamic default)', () => {
   assert.deepEqual(
-    extractKeys('ESIN-1 OPP-2 FOO-3 PROJ-99', []),
-    ['ESIN-1', 'OPP-2', 'FOO-3', 'PROJ-99']
+    extractKeys('DEMO-1 TASK-2 FOO-3 PROJ-99', []),
+    ['DEMO-1', 'TASK-2', 'FOO-3', 'PROJ-99']
   );
 });
 
 test('ignores lowercase keys', () => {
-  assert.deepEqual(extractKeys('esin-1 ESIN-2'), ['ESIN-2']);
+  assert.deepEqual(extractKeys('demo-1 DEMO-2'), ['DEMO-2']);
 });
 
 test('ignores single-char prefix (regex requires 2+)', () => {
@@ -50,29 +50,29 @@ test('ignores single-char prefix (regex requires 2+)', () => {
 });
 
 test('extracts from branch-like text', () => {
-  assert.deepEqual(extractKeys('ESIN-4349/qa'), ['ESIN-4349']);
+  assert.deepEqual(extractKeys('DEMO-4349/qa'), ['DEMO-4349']);
 });
 
-test('extracts from PR title "Merged PR 57261: [ESIN-4185] ..."', () => {
-  // "PR 57261" has a space (not a dash) so only ESIN-4185 matches.
+test('extracts from PR title "Merged PR 57261: [DEMO-4185] ..."', () => {
+  // "PR 57261" has a space (not a dash) so only DEMO-4185 matches.
   assert.deepEqual(
-    extractKeys('Merged PR 57261: [ESIN-4185] fix retry logic'),
-    ['ESIN-4185']
+    extractKeys('Merged PR 57261: [DEMO-4185] fix retry logic'),
+    ['DEMO-4185']
   );
 });
 
 test('isValidKey', () => {
-  assert.equal(isValidKey('ESIN-123'), true);
+  assert.equal(isValidKey('DEMO-123'), true);
   assert.equal(isValidKey('AB-1'), true);
   assert.equal(isValidKey('A1-1'), true);
   assert.equal(isValidKey('A-1'), false);
-  assert.equal(isValidKey('esin-1'), false);
+  assert.equal(isValidKey('demo-1'), false);
   assert.equal(isValidKey('ESIN123'), false);
   assert.equal(isValidKey(''), false);
   assert.equal(isValidKey(null), false);
 });
 
 test('prefixOf', () => {
-  assert.equal(prefixOf('ESIN-123'), 'ESIN');
-  assert.equal(prefixOf('OPP-5'), 'OPP');
+  assert.equal(prefixOf('DEMO-123'), 'DEMO');
+  assert.equal(prefixOf('TASK-5'), 'TASK');
 });

@@ -42,43 +42,43 @@ test('unknown command exits 1', () => {
 test('bare ticket key works as show', () => {
   const dir = tmpdir();
   fs.mkdirSync(path.join(dir, 'tickets'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'tickets', 'ESIN-1.json'), JSON.stringify({
-    key: 'ESIN-1', title: 'test', status: '', repos: [], branches: [],
+  fs.writeFileSync(path.join(dir, 'tickets', 'DEMO-1.json'), JSON.stringify({
+    key: 'DEMO-1', title: 'test', status: '', repos: [], branches: [],
     firstActive: '2026-10-20', lastActive: '2026-10-20', activeDates: ['2026-10-20'],
     commits: [], prs: [], docs: [], findings: [], rca: null, notes: ''
   }));
-  const r = run(['ESIN-1'], { WORKLOG_DIR: dir });
+  const r = run(['DEMO-1'], { WORKLOG_DIR: dir });
   assert.ok(r.ok, r.stderr);
-  assert.match(r.stdout, /ESIN-1 — test/);
+  assert.match(r.stdout, /DEMO-1 — test/);
 });
 
 test('--json emits parseable JSON for ticket', () => {
   const dir = tmpdir();
   fs.mkdirSync(path.join(dir, 'tickets'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'tickets', 'ESIN-1.json'), JSON.stringify({
-    key: 'ESIN-1', title: 'test', status: '', repos: [], branches: [],
+  fs.writeFileSync(path.join(dir, 'tickets', 'DEMO-1.json'), JSON.stringify({
+    key: 'DEMO-1', title: 'test', status: '', repos: [], branches: [],
     firstActive: null, lastActive: null, activeDates: [],
     commits: [], prs: [], docs: [], findings: [], rca: null, notes: ''
   }));
-  const r = run(['ESIN-1', '--json'], { WORKLOG_DIR: dir });
+  const r = run(['DEMO-1', '--json'], { WORKLOG_DIR: dir });
   assert.ok(r.ok);
   const parsed = JSON.parse(r.stdout);
-  assert.equal(parsed.key, 'ESIN-1');
+  assert.equal(parsed.key, 'DEMO-1');
   assert.equal(parsed.title, 'test');
 });
 
 test('note persists a multi-word finding with correct kind', () => {
   const dir = tmpdir();
   fs.mkdirSync(path.join(dir, 'tickets'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'tickets', 'ESIN-9.json'), JSON.stringify({
-    key: 'ESIN-9', title: '', status: '', repos: [], branches: [],
+  fs.writeFileSync(path.join(dir, 'tickets', 'DEMO-9.json'), JSON.stringify({
+    key: 'DEMO-9', title: '', status: '', repos: [], branches: [],
     firstActive: null, lastActive: null, activeDates: [],
     commits: [], prs: [], docs: [], findings: [], rca: null, notes: ''
   }));
-  const r = run(['note', '--ticket', 'ESIN-9', '--kind', 'ruled-out', 'the thing was not the cause'],
+  const r = run(['note', '--ticket', 'DEMO-9', '--kind', 'ruled-out', 'the thing was not the cause'],
     { WORKLOG_DIR: dir });
   assert.ok(r.ok, r.stderr);
-  const t = JSON.parse(fs.readFileSync(path.join(dir, 'tickets', 'ESIN-9.json'), 'utf8'));
+  const t = JSON.parse(fs.readFileSync(path.join(dir, 'tickets', 'DEMO-9.json'), 'utf8'));
   assert.equal(t.findings.length, 1);
   assert.equal(t.findings[0].kind, 'ruled-out');
   assert.equal(t.findings[0].text, 'the thing was not the cause');
@@ -88,7 +88,7 @@ test('note persists a multi-word finding with correct kind', () => {
 test('note rejects invalid kind', () => {
   const dir = tmpdir();
   fs.mkdirSync(path.join(dir, 'tickets'), { recursive: true });
-  const r = run(['note', '--ticket', 'ESIN-1', '--kind', 'bogus', 'text'], { WORKLOG_DIR: dir });
+  const r = run(['note', '--ticket', 'DEMO-1', '--kind', 'bogus', 'text'], { WORKLOG_DIR: dir });
   assert.equal(r.ok, false);
   assert.match(r.stderr, /--kind must be one of/);
 });
@@ -103,8 +103,8 @@ test('note rejects malformed ticket key', () => {
 test('search --json returns structured hits', () => {
   const dir = tmpdir();
   fs.mkdirSync(path.join(dir, 'tickets'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'tickets', 'ESIN-1.json'), JSON.stringify({
-    key: 'ESIN-1', title: 'deadlock in SF', status: '', repos: [], branches: [],
+  fs.writeFileSync(path.join(dir, 'tickets', 'DEMO-1.json'), JSON.stringify({
+    key: 'DEMO-1', title: 'deadlock in SF', status: '', repos: [], branches: [],
     firstActive: null, lastActive: null, activeDates: [],
     commits: [{ sha: 'abc', message: 'fix deadlock', date: '2026-10-20T00:00:00Z', repo: 'r' }],
     prs: [], docs: [], findings: [], rca: null, notes: ''
@@ -114,7 +114,7 @@ test('search --json returns structured hits', () => {
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.needle, 'deadlock');
   assert.equal(parsed.count, 1);
-  assert.equal(parsed.hits[0].key, 'ESIN-1');
+  assert.equal(parsed.hits[0].key, 'DEMO-1');
   assert.ok(parsed.hits[0].matches.length >= 2);
 });
 

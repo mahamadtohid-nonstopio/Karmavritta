@@ -1,7 +1,14 @@
 {
   "name": "worklog",
-  "version": "0.2.0",
+  "displayName": "Worklog",
+  "version": "0.3.0",
   "description": "Captures Claude Code sessions and auto-logs commits, docs and findings per ticket",
-  "author": "Mahamadtohid",
-  "hooks": "./hooks/hooks.json"
+  "author": {
+    "name": "Mahamadtohid",
+    "url": "https://github.com/mahamadtohid-nonstopio"
+  },
+  "homepage": "https://github.com/mahamadtohid-nonstopio/Karmavritta",
+  "repository": "https://github.com/mahamadtohid-nonstopio/Karmavritta",
+  "license": "MIT",
+  "keywords": ["worklog", "journal", "ticket", "standup", "timesheet"]
 }

@@ -66,5 +66,5 @@ process), `public` (leaving the machine). Each is a superset of the previous.
 ## Running the tests
 
 ```powershell
-npm test          # requires Node >= 18; `node --test test/`
+npm test          # requires Node >= 18; runs test/run.mjs
 ```

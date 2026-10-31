@@ -1,13 +1,13 @@
 {
   "name": "worklog-claude",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude Code plugin that captures your sessions and keeps a per-ticket worklog (Jira/ADO/any prefix)",
   "type": "module",
   "bin": {
     "worklog": "./bin/worklog.mjs"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node test/run.mjs"
   },
   "engines": {
     "node": ">=18"

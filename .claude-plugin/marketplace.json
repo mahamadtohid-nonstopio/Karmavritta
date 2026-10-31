@@ -1,0 +1,18 @@
+{
+  "name": "karmavritta",
+  "owner": {
+    "name": "Mahamadtohid",
+    "url": "https://github.com/mahamadtohid-nonstopio"
+  },
+  "description": "Worklog: an automatic, private, per-ticket worklog for Claude Code sessions.",
+  "plugins": [
+    {
+      "name": "worklog",
+      "displayName": "Worklog",
+      "source": "./",
+      "description": "Captures Claude Code sessions into daily and per-ticket notes, with recall, standups, handovers, activity sheets and redacted export.",
+      "version": "0.3.0",
+      "category": "productivity"
+    }
+  ]
+}

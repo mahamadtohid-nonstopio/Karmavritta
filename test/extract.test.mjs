@@ -86,12 +86,12 @@ test('validated text is redacted at public level and length-capped', () => {
 test('the digest is numbered by event id and marks failures', () => {
   sandbox();
   const cfg = loadConfig();
-  const digest = buildDigest('ESIN-1', '2026-10-20', [
+  const digest = buildDigest('DEMO-1', '2026-10-20', [
     { id: 'e_aaa111', event: 'UserPromptSubmit', summary: 'look at the retry loop' },
     { id: 'e_bbb222', event: 'PostToolUse', tool: 'Bash', summary: 'npm test', ok: false, error: 'exit 1' }
   ], cfg);
 
-  assert.match(digest, /Work item: ESIN-1/);
+  assert.match(digest, /Work item: DEMO-1/);
   assert.match(digest, /- e_aaa111 UserPromptSubmit: look at the retry loop/);
   assert.match(digest, /- e_bbb222 PostToolUse\/Bash \[FAILED\]: npm test/);
   assert.match(digest, /error: exit 1/);
@@ -100,7 +100,7 @@ test('the digest is numbered by event id and marks failures', () => {
 test('the digest redacts secrets before anything leaves the process', () => {
   sandbox();
   const cfg = loadConfig();
-  const digest = buildDigest('ESIN-1', '2026-10-20', [
+  const digest = buildDigest('DEMO-1', '2026-10-20', [
     { id: 'e_aaa111', event: 'PostToolUse', tool: 'Bash', summary: 'curl -H "api_key: sk-livetestvalue123456"' }
   ], cfg);
   assert.ok(!digest.includes('sk-livetestvalue123456'));
@@ -121,7 +121,7 @@ test('a missing prompt name returns empty rather than throwing', () => {
 });
 
 test('the deterministic summary states counts without inventing findings', () => {
-  const s = deterministicSummary('ESIN-1', '2026-10-20', [
+  const s = deterministicSummary('DEMO-1', '2026-10-20', [
     { tool: 'Read', kind: 'file', summary: 'a.ts' },
     { tool: 'Read', kind: 'file', summary: 'b.ts' },
     { tool: 'Bash', kind: 'artifact', summary: 'npm test', ok: false }
@@ -140,7 +140,7 @@ test('extraction is skipped, not attempted, when the model is disabled', () => {
   cfg.model.enabled = false;
   saveConfig(cfg);
 
-  const r = runExtraction({ key: 'ESIN-1', day: '2026-10-20', events: [{ id: 'e_a' }], cfg: loadConfig() });
+  const r = runExtraction({ key: 'DEMO-1', day: '2026-10-20', events: [{ id: 'e_a' }], cfg: loadConfig() });
   assert.equal(r.used, 'skipped');
   assert.match(r.reason, /disabled/);
   assert.equal(r.result, null);
@@ -153,7 +153,7 @@ test('the per-tick cap stops the second call in the same tick', () => {
   saveConfig(cfg);
 
   const r = runExtraction({
-    key: 'ESIN-1', day: '2026-10-20', events: [{ id: 'e_a' }], cfg: loadConfig(), callsThisTick: 1
+    key: 'DEMO-1', day: '2026-10-20', events: [{ id: 'e_a' }], cfg: loadConfig(), callsThisTick: 1
   });
   assert.equal(r.used, 'skipped');
   assert.match(r.reason, /per-tick cap/);

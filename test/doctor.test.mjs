@@ -51,7 +51,7 @@ test('capture and tick flip to ok once events have been summarised', async () =>
   cfg.model.enabled = false;
   saveConfig(cfg);
 
-  captureEvent({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'ESIN-1 work' });
+  captureEvent({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'DEMO-1 work' });
   await runTick();
 
   const report = diagnose();

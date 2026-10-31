@@ -2,14 +2,14 @@
 
 A Claude Code plugin + CLI that builds **one record per ticket, automatically**.
 It captures your Claude Code sessions as they happen, scans your git commits and
-docs, groups everything by `ESIN-123` / `PROJ-456` / `OPP-7` style keys, and
+docs, groups everything by `DEMO-123` / `PROJ-456` / `TASK-7` style keys, and
 writes a daily note plus a rolling note per work item.
 
 - **Automatic session capture.** Hooks record every prompt and tool call to a
   local raw log. A background tick turns them into notes a few minutes later.
   Nothing is asked of you during the session.
 - **Zero runtime dependencies.** Pure Node (≥ 18). Windows, macOS, Linux.
-- **Dynamic ticket prefixes** — the regex is `[A-Z][A-Z0-9]+-\d+`. ESIN, OPP,
+- **Dynamic ticket prefixes** — the regex is `[A-Z][A-Z0-9]+-\d+`. DEMO, TASK,
   PROJ, FOO all work with no code change. Set `keyPrefixes` to restrict it.
 - **Private by construction.** Everything stays on your disk. Secrets are masked
   at capture, again before any model call, again before any export.
@@ -47,7 +47,22 @@ Three properties hold the design together:
 
 ## 1. Install
 
-### From source (right now)
+### From the plugin marketplace (recommended)
+
+Inside Claude Code, on any machine:
+
+```
+/plugin marketplace add mahamadtohid-nonstopio/Karmavritta
+/plugin install worklog@karmavritta
+```
+
+Restart Claude Code, then run `/worklog:setup`. Setup copies the runtime the
+background tick needs into `~/.worklog/runtime/`, so no npm step is required.
+To update later, run `/plugin marketplace update karmavritta`, then
+`/worklog:setup` again to refresh the runtime copy. For the `worklog` command in
+a plain terminal as well, use one of the routes below.
+
+### From source
 
 ```powershell
 cd C:\Vibe-code\worklog-plugin
@@ -85,16 +100,16 @@ Then edit `~/.worklog/config.json` to point at your work:
 ```json
 {
   "repos": [
-    "C:\\Projects\\PE-DryLabAPI",
-    "C:\\Projects\\PE-wgs-review-tool"
+    "C:\\Projects\\api-service",
+    "C:\\Projects\\web-app"
   ],
   "docsFolders": [
     "C:\\Projects\\docs"
   ],
   "keyPrefixes": [],
   "authors": {
-    "names": ["Suraj Wankhade", "Mahamadtohid"],
-    "emails": ["you@nonstopio.com"]
+    "names": ["Your Name"],
+    "emails": ["you@example.com"]
   },
   "ado":  { "org": "", "project": "" },
   "jira": { "site": "" },
@@ -111,7 +126,7 @@ Then edit `~/.worklog/config.json` to point at your work:
 | --- | --- |
 | `repos` | Absolute paths to git repos to scan |
 | `docsFolders` | Folders scanned recursively for `*.md` files |
-| `keyPrefixes` | **Leave empty to accept any `PROJ-123` style key** — switching projects needs zero code change. Set `["ESIN","OPP"]` to restrict. |
+| `keyPrefixes` | **Leave empty to accept any `PROJ-123` style key** — switching projects needs zero code change. Set `["DEMO","TASK"]` to restrict. |
 | `authors` | Filters git log to just your commits (OR'd across names and emails) |
 | `capture` | Session capture. `paused: true` keeps hooks loaded but records nothing. Raw events are deleted after `retainRawDays`; the notes stay. |
 | `redaction` | `local` \| `secrets` \| `public` — see §4. `names` are masked in free text. |
@@ -144,7 +159,7 @@ That's the one-time full scan. Everything after that is incremental.
 ```powershell
 worklog today                       # the daily note, rendered from captured sessions
 worklog today 2026-10-20            # any past day
-worklog item ESIN-4349              # rolling note: timeline, findings, files, commands
+worklog item DEMO-4349              # rolling note: timeline, findings, files, commands
 worklog status                      # capture on? tick fresh? what has it spent?
 ```
 
@@ -164,7 +179,7 @@ worklog resume
 worklog list                        # all tickets, newest activity first
 worklog recent --days 7             # what you touched this week
 worklog month 2026-08               # tickets active in August
-worklog ESIN-4349                   # ticket detail (commits, docs, findings, RCA)
+worklog DEMO-4349                   # ticket detail (commits, docs, findings, RCA)
 worklog search deadlock             # grep titles, commit msgs, doc names, findings
 worklog stats                       # overall counts
 worklog _unassigned                 # commits/docs with no key found
@@ -180,23 +195,38 @@ worklog backfill --since 2026-10-01 # explicit window override
 ### Logging findings as you investigate
 
 ```powershell
-worklog note --ticket ESIN-4349 --kind ruled-out "transactionscope was not the cause"
-worklog note --ticket ESIN-4349 --kind finding   "retry queue drains on process restart"
+worklog note --ticket DEMO-4349 --kind ruled-out "transactionscope was not the cause"
+worklog note --ticket DEMO-4349 --kind finding   "retry queue drains on process restart"
 ```
 
 Kinds: `finding | hypothesis | ruled-out | decision | note`.
 
+### Activity sheet and export
+
+```powershell
+worklog week                              # this ISO week, events per item per day
+worklog timesheet --month --date 2026-09-15 --csv
+worklog export DEMO-4349                  # ~/.worklog/exports/DEMO-4349-<date>.md
+worklog export DEMO-4349 --format html    # single self-contained HTML page
+```
+
+The capture log records events, not durations, so the sheet counts recorded
+events, sessions and commits. It is a measure of activity, never of hours.
+An export is always redacted at `public` level, whatever `redaction.mode`
+says, because the file is meant to leave the machine. `--out FILE` is
+accepted only inside the write allowlist.
+
 ### Opening the ticket's doc
 
 ```powershell
-worklog open ESIN-4349   # opens the newest linked .md in VS Code
+worklog open DEMO-4349   # opens the newest linked .md in VS Code
 ```
 
 ### JSON mode (for scripts and Claude)
 
 ```powershell
 worklog list     --json
-worklog ESIN-4349 --json
+worklog DEMO-4349 --json
 worklog recent  --days 7 --json
 worklog search  deadlock --json
 worklog stats   --json
@@ -207,13 +237,43 @@ worklog stats   --json
 Once the plugin is installed and Claude Code is restarted, type:
 
 ```
-/worklog ESIN-4349
+/worklog DEMO-4349
 /worklog recent --days 7
 /worklog search deadlock
 /worklog sync
 ```
 
 The slash command just shells out to the `worklog` CLI; output is shown inline.
+
+### Skills
+
+The plugin also ships one skill per task, namespaced `/worklog:<name>`. They call
+the bundled CLI directly (`node "${CLAUDE_PLUGIN_ROOT}/bin/worklog.mjs"`), so
+they work without `npm link`. Skills marked *explicit* only run when you type
+them. The two *model-invoked* skills are picked up automatically when what you
+say matches.
+
+| Skill | Kind | What it does |
+| --- | --- | --- |
+| `/worklog:setup` | explicit | Create the data home, schedule the tick, set repos/docs, then run doctor |
+| `/worklog:doctor` | explicit | Health checks and today's spend; diagnoses only |
+| `/worklog:pause [resume\|status]` | explicit | Stop or restart capture |
+| `/worklog:today [day]` | explicit | The daily note for today or any day |
+| `/worklog:item <KEY>` | explicit | Everything recorded for one item, with paths to open |
+| `/worklog:search <words>` | explicit | Matches across titles, commits, docs and findings |
+| `/worklog:tick [--force] [day]` | explicit | Summarise captured events now |
+| `/worklog:sync [--since D]` | explicit | Re-scan repos and docs folders |
+| `/worklog:recent [range]` | explicit | Items touched in N days, a month, or all; stats |
+| `/worklog:timesheet [month] [date] [csv]` | explicit | Activity per item per day (events, **not hours**) |
+| `/worklog:standup [day]` | explicit | Yesterday / Today / Blockers from the daily notes |
+| `/worklog:handover <KEY>` | explicit | A cited handover note for one item (shown, not written) |
+| `/worklog:export <KEY> [md\|html]` | explicit | One-file copy with `public` redaction |
+| `/worklog:config …` | explicit | Get, set, undo and history for settings |
+| `recall` | model-invoked | Answers "what do we know about ABC-123?" from the worklog, citing files |
+| `note` | model-invoked | Records "log finding: …" / "ruled out …" via `worklog note` |
+
+`test/skills.test.mjs` checks every skill's frontmatter and that each CLI
+subcommand a skill runs actually exists.
 
 ### Full command reference
 
@@ -241,9 +301,12 @@ The slash command just shells out to the `worklog` CLI; output is shown inline.
 | `worklog <KEY>` or `worklog ticket <KEY>` | Ticket detail |
 | `worklog note --ticket <KEY> --kind <k> "<text>"` | Add a finding |
 | `worklog open <KEY>` | Open newest linked doc in VS Code |
+| `worklog week [--date D] [--csv]` | Activity per item per day for the ISO week |
+| `worklog timesheet [--month] [--date D] [--csv]` | Same sheet, week or month |
+| `worklog export <KEY> [--format md\|html] [--out FILE]` | Public-redacted copy of the item note |
 | `worklog help` | Help text |
 
-All read commands (`list`, `month`, `recent`, `search`, `stats`, `ticket`, `<KEY>`) support `--json`.
+All read commands (`list`, `month`, `recent`, `search`, `stats`, `ticket`, `<KEY>`, `week`, `timesheet`) support `--json`.
 
 ---
 
@@ -302,17 +365,17 @@ So that you (or anyone) can `npm install -g` it later from any machine.
 Scoped is safest — the name is always available under your scope:
 
 ```powershell
-npm view @nonstopio/worklog-claude     # should 404 (not taken)
+npm view @yourscope/worklog-claude     # should 404 (not taken)
 ```
 
-Edit `package.json` → set `"name": "@nonstopio/worklog-claude"` (or keep
+Edit `package.json` → set `"name": "@yourscope/worklog-claude"` (or keep
 unscoped if `worklog-claude` is free).
 
 ### 5.2 Fill in metadata
 
 ```json
 {
-  "name": "@nonstopio/worklog-claude",
+  "name": "@yourscope/worklog-claude",
   "version": "0.1.0",
   "description": "...",
   "repository": {
@@ -321,7 +384,7 @@ unscoped if `worklog-claude` is free).
   },
   "homepage": "https://github.com/mahamadtohid-nonstopio/Karmavritta#readme",
   "bugs": { "url": "https://github.com/mahamadtohid-nonstopio/Karmavritta/issues" },
-  "author": "Mahamadtohid Naikwadi <mahamadtohid.naikwadi@nonstopio.com>",
+  "author": "Your Name <you@example.com>",
   "license": "MIT"
 }
 ```
@@ -363,7 +426,7 @@ Appears at `https://www.npmjs.com/package/<name>` within ~30s.
 ### 5.6 Install from anywhere later
 
 ```powershell
-npm install -g @nonstopio/worklog-claude
+npm install -g @yourscope/worklog-claude
 worklog install
 worklog init
 # ...edit config, backfill
@@ -436,8 +499,8 @@ Nuclear-option clean-slate test (optional, best right before publish):
 
 ```powershell
 npm unlink -g worklog-claude
-Remove-Item -Recurse C:\Users\nonstop\.claude\plugins\worklog
-Remove-Item -Recurse C:\Users\nonstop\.worklog
+Remove-Item -Recurse $HOME\.claude\plugins\worklog
+Remove-Item -Recurse $HOME\.worklog
 
 cd C:\Vibe-code\worklog-plugin
 npm link
@@ -479,8 +542,8 @@ Override the data dir for testing with `WORKLOG_DIR=/tmp/sandbox`.
 
 ```powershell
 npm unlink -g worklog-claude                           # or: npm uninstall -g worklog-claude
-Remove-Item -Recurse C:\Users\nonstop\.claude\plugins\worklog
-Remove-Item -Recurse C:\Users\nonstop\.worklog         # drops your data (optional)
+Remove-Item -Recurse $HOME\.claude\plugins\worklog
+Remove-Item -Recurse $HOME\.worklog         # drops your data (optional)
 ```
 
 ---

@@ -26,6 +26,17 @@ export async function installPlugin() {
   console.log('  4. Optionally add repos/docsFolders to the config and run `worklog backfill`.');
 }
 
+/**
+ * Refresh only the runtime copy the scheduled tick runs from. `setup` calls
+ * this, so a marketplace install (where nobody runs `worklog install`) still
+ * gets a tick that exists, and re-running setup after an update refreshes it.
+ */
+export function refreshRuntime() {
+  const runtime = getRuntimeDir();
+  copyPayload(runtime);
+  return runtime;
+}
+
 function copyPayload(target) {
   safety.mkdirp(path.dirname(target));
   if (fs.existsSync(target)) safety.removePath(target, { recursive: true });

@@ -25,21 +25,21 @@ function promptEvent(prompt, session = 's1') {
 
 test('a prompt event lands as one json line in the day file', () => {
   sandbox();
-  const r = captureEvent(promptEvent('looking at ESIN-4349 deadlock'));
+  const r = captureEvent(promptEvent('looking at DEMO-4349 deadlock'));
   assert.equal(r.written, true);
   assert.ok(fs.existsSync(r.file));
   const lines = fs.readFileSync(r.file, 'utf8').trim().split('\n');
   assert.equal(lines.length, 1);
   const rec = JSON.parse(lines[0]);
   assert.equal(rec.event, 'UserPromptSubmit');
-  assert.deepEqual(rec.keys, ['ESIN-4349']);
+  assert.deepEqual(rec.keys, ['DEMO-4349']);
   assert.match(rec.summary, /deadlock/);
 });
 
 test('events append rather than overwrite, and read back in time order', () => {
   sandbox();
-  captureEvent(promptEvent('first ESIN-1'));
-  captureEvent(promptEvent('second ESIN-1'));
+  captureEvent(promptEvent('first DEMO-1'));
+  captureEvent(promptEvent('second DEMO-1'));
   captureEvent({ hook_event_name: 'PreToolUse', session_id: 's1', cwd: ROOT, tool_name: 'Bash', tool_input: { command: 'git status' } });
   const day = readRawDay(dayOf());
   assert.equal(day.length, 3);
@@ -92,7 +92,7 @@ test('PostToolUse records failure and a clipped error', () => {
 test('event ids are stable for identical input', () => {
   const cfg = { keyPrefixes: [], capture: { maxFieldChars: 2000 }, redaction: { mode: 'secrets' } };
   const now = new Date('2026-10-26T10:00:00.000Z');
-  const payload = promptEvent('ESIN-1 hello');
+  const payload = promptEvent('DEMO-1 hello');
   assert.equal(buildRecord(payload, cfg, { now }).id, buildRecord(payload, cfg, { now }).id);
 });
 
@@ -101,7 +101,7 @@ test('capture honours the paused switch', () => {
   const cfg = loadConfig();
   cfg.capture.paused = true;
   saveConfig(cfg);
-  assert.deepEqual(captureEvent(promptEvent('ESIN-2 while paused')), { skipped: 'paused' });
+  assert.deepEqual(captureEvent(promptEvent('DEMO-2 while paused')), { skipped: 'paused' });
   assert.equal(readRawDay(dayOf()).length, 0);
 });
 
@@ -110,17 +110,17 @@ test('events outside the configured list are not captured', () => {
   const cfg = loadConfig();
   cfg.capture.events = ['SessionStart'];
   saveConfig(cfg);
-  assert.deepEqual(captureEvent(promptEvent('ESIN-3')), { skipped: 'event-not-captured' });
+  assert.deepEqual(captureEvent(promptEvent('DEMO-3')), { skipped: 'event-not-captured' });
 });
 
 test('keyPrefixes restricts which keys are tagged', () => {
   sandbox();
   const cfg = loadConfig();
-  cfg.keyPrefixes = ['ESIN'];
+  cfg.keyPrefixes = ['DEMO'];
   saveConfig(cfg);
-  captureEvent(promptEvent('ESIN-5 and OPP-9 together'));
+  captureEvent(promptEvent('DEMO-5 and TASK-9 together'));
   const [rec] = readRawDay(dayOf());
-  assert.deepEqual(rec.keys, ['ESIN-5']);
+  assert.deepEqual(rec.keys, ['DEMO-5']);
 });
 
 test('summarizeTool picks the field that matters per tool', () => {
@@ -133,9 +133,9 @@ test('summarizeTool picks the field that matters per tool', () => {
 
 test('a corrupt raw line does not stop the day from being read', () => {
   sandbox();
-  const r = captureEvent(promptEvent('ESIN-6 good line'));
+  const r = captureEvent(promptEvent('DEMO-6 good line'));
   fs.appendFileSync(r.file, '{ this is not json\n');
-  captureEvent(promptEvent('ESIN-6 another good line'));
+  captureEvent(promptEvent('DEMO-6 another good line'));
   assert.equal(readRawDay(dayOf()).length, 2);
 });
 
@@ -160,7 +160,7 @@ function runHook(payload, env = {}) {
 
 test('hook binary exits 0 and prints nothing on a normal event', () => {
   const dir = sandbox();
-  const r = runHook(promptEvent('ESIN-7 via the real hook'), { WORKLOG_DIR: dir });
+  const r = runHook(promptEvent('DEMO-7 via the real hook'), { WORKLOG_DIR: dir });
   assert.equal(r.stdout, '');
   const file = rawFileFor(dayOf(), 's1');
   assert.ok(fs.existsSync(file), 'hook should have written the raw file');
@@ -177,5 +177,5 @@ test('hook binary exits 0 when the data home is unwritable', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'worklog-hostile-'));
   const asFile = path.join(dir, 'not-a-dir');
   fs.writeFileSync(asFile, 'x');
-  assert.doesNotThrow(() => runHook(promptEvent('ESIN-8'), { WORKLOG_DIR: asFile }));
+  assert.doesNotThrow(() => runHook(promptEvent('DEMO-8'), { WORKLOG_DIR: asFile }));
 });
