@@ -1,631 +1,404 @@
-# worklog-claude
+# Worklog
 
-A Claude Code plugin + CLI that builds **one record per ticket, automatically**.
-It captures your Claude Code sessions as they happen, scans your git commits and
-docs, groups everything by `DEMO-123` / `PROJ-456` / `TASK-7` style keys, and
-writes a daily note plus a rolling note per work item.
+**An automatic, private worklog for Claude Code: one record per ticket, written for you.**
 
-- **Automatic session capture.** Hooks record every prompt and tool call to a
-  local raw log. A background tick turns them into notes a few minutes later.
-  Nothing is asked of you during the session.
-- **Zero runtime dependencies.** Pure Node (≥ 18). Windows, macOS, Linux.
-- **Dynamic ticket prefixes** — the regex is `[A-Z][A-Z0-9]+-\d+`. DEMO, TASK,
-  PROJ, FOO all work with no code change. Set `keyPrefixes` to restrict it.
-- **Private by construction.** Everything stays on your disk. Secrets are masked
-  at capture, again before any model call, again before any export.
-- **Read-only toward your work.** Writes are confined to an allowlist of roots;
-  your repos, hosts and trackers are only ever read.
-- `/worklog` slash command inside Claude Code, or `worklog` CLI from any shell.
+Work done in Claude Code sessions is easy to lose. A week later nobody can say
+what was found, what was tried, what was ruled out or why a decision was made.
+Worklog keeps that memory for you. It records your sessions as you work,
+groups everything by ticket key (`ABC-123`, `PROJ-45`, …) and writes a daily
+note plus a running note per ticket. Afterwards you, or Claude, can ask
+*"what do we know about ABC-123?"* and get an answer with sources.
+
+- **Zero effort.** Nothing to remember during a session. Hooks record silently.
+- **Private.** Everything stays on your disk. Secrets are masked before anything is saved.
+- **Safe.** It never changes your repos, Git host, tracker or database. It only reads.
+- **Cheap.** Model calls are optional and capped by a daily budget. Without them it still works.
+- **No dependencies.** Pure Node.js 18+ on Windows, macOS and Linux.
 
 ---
 
-## 0. How the capture pipeline works
+## Contents
+
+1. [What it does](#what-it-does)
+2. [How it works](#how-it-works)
+3. [Install](#install)
+4. [Set it up](#set-it-up)
+5. [Skills](#skills)
+6. [Commands](#commands)
+7. [Configuration](#configuration)
+8. [Privacy and safety](#privacy-and-safety)
+9. [Where your data lives](#where-your-data-lives)
+10. [Troubleshooting](#troubleshooting)
+11. [Uninstall](#uninstall)
+12. [Development](#development)
+
+---
+
+## What it does
+
+| | |
+| --- | --- |
+| **Captures sessions** | Every prompt and tool call in Claude Code is recorded to a local log, redacted at capture. |
+| **Groups by ticket** | Any `[A-Z][A-Z0-9]+-\d+` key in a prompt, branch name, commit or file name ties the work to that ticket. Any prefix works out of the box. |
+| **Writes notes** | Every 5 minutes a background job turns new events into a **daily note** and a rolling **per-ticket note** (summary, findings, decisions, root cause, files, commands, timeline). |
+| **Imports git and docs** | Commits from your repos and Markdown docs from your folders are attached to the same tickets. |
+| **Answers questions** | The `recall` skill lets Claude answer from your worklog and cite where each fact came from. |
+| **Standups and handovers** | Drafts a Yesterday/Today/Blockers standup or a ticket handover from what was actually recorded. |
+| **Activity sheet** | Activity per ticket per day for a week or month, as a table or CSV. |
+| **Shareable export** | One-file Markdown or HTML copy of a ticket, with strict redaction for sharing. |
+| **Health checks** | `doctor` checks hooks, the background job, the scheduler, the model budget and recent errors, and prints a fix for each problem. |
+| **Undo for settings** | Every config change is backed up and can be reverted. |
+
+---
+
+## How it works
 
 ```
 Claude Code session
-      │  hooks (fail-open, <100ms, silent)
+      │  hooks: silent, fail-open, < 100 ms each
       ▼
-~/.worklog/raw/<day>/<session>.jsonl     redacted event lines
-      │  background tick, every 5 min
+~/.worklog/raw/<day>/<session>.jsonl        redacted event lines
+      │  background tick, every 5 minutes
       ▼
-  merge by stable content id  ──►  ~/.worklog/tickets/<KEY>.json
-      │  optional `claude -p` extraction, budget-capped
+  merge by stable id  ──►  ~/.worklog/tickets/<KEY>.json
+      │  optional `claude -p` extraction, budget-capped, every claim cited
       ▼
-~/.worklog/daily/<day>.md  +  ~/.worklog/items/<KEY>/README.md
+~/.worklog/daily/<day>.md   +   ~/.worklog/items/<KEY>/README.md
 ```
 
-Three properties hold the design together:
-
-- **The tick is the only writer of notes**, it holds a lock, and it is
-  idempotent — re-running it over the same events adds nothing.
-- **Every model claim must cite an event id** that exists in the raw log.
-  Uncited claims are dropped, not softened.
-- **The model is optional.** If `claude` is missing, disabled or over budget,
-  the tick falls back to a deterministic summary rather than skipping.
+- **The tick is the only writer of notes.** It holds a lock, and re-running it adds no duplicates.
+- **Every model claim must cite a recorded event.** Claims without a citation are dropped, not kept in softened form.
+- **The model is optional.** If `claude` is missing, disabled or over budget, Worklog writes a deterministic summary instead.
 
 ---
 
-## 1. Install
+## Install
 
-### From the plugin marketplace (recommended)
+**Requirements:** [Node.js](https://nodejs.org) **18 or newer** and **git** on your PATH.
+Check with `node --version`.
 
-Inside Claude Code, on any machine:
+### Option A: Claude Code plugin marketplace (recommended)
+
+Inside Claude Code:
 
 ```
 /plugin marketplace add mahamadtohid-nonstopio/Karmavritta
 /plugin install worklog@karmavritta
 ```
 
-Restart Claude Code, then run `/worklog:setup`. Setup copies the runtime the
-background tick needs into `~/.worklog/runtime/`, so no npm step is required.
-To update later, run `/plugin marketplace update karmavritta`, then
-`/worklog:setup` again to refresh the runtime copy. For the `worklog` command in
-a plain terminal as well, use one of the routes below.
+Restart Claude Code, then run `/worklog:setup`.
 
-### From source
+**Update later:** `/plugin marketplace update karmavritta`, then `/worklog:setup` again.
 
-```powershell
-cd C:\Vibe-code\worklog-plugin
-npm link            # puts the `worklog` CLI on your PATH
-worklog install     # copies the Claude Code plugin into ~/.claude/plugins/worklog
-```
-
-Then **restart Claude Code** once so it picks up the slash command.
-
-### From npm
+### Option B: npm (also gives you the `worklog` terminal command)
 
 ```bash
 npm install -g worklog-claude
-worklog install     # copies the Claude Code plugin into ~/.claude/plugins/worklog
-worklog setup
+worklog install      # copies the plugin into ~/.claude/plugins/worklog
 ```
 
-This also puts the `worklog` command on your PATH for use outside Claude Code.
+Restart Claude Code, then run `worklog setup`.
 
-Requires **Node ≥ 18** and **git** on PATH.
+**Update later:** `npm update -g worklog-claude && worklog install && worklog setup`.
+
+### Option C: from source
+
+```bash
+git clone https://github.com/mahamadtohid-nonstopio/Karmavritta.git
+cd Karmavritta
+npm link             # puts `worklog` on your PATH
+worklog install
+```
 
 ---
 
-## 2. Set it up
+## Set it up
 
-```powershell
-worklog setup            # creates ~/.worklog and schedules the background tick
-worklog doctor           # confirms hooks, tick, scheduler and budget are healthy
+Run `/worklog:setup` inside Claude Code, or `worklog setup` in a terminal. Setup:
+
+1. creates the data folder `~/.worklog`
+2. copies the runtime the background job uses into `~/.worklog/runtime/`
+3. schedules the background job with your OS (Task Scheduler on Windows,
+   launchd on macOS, cron on Linux), every 5 minutes by default (`--interval N`)
+4. asks which **repos** and **docs folders** to import (optional)
+
+Then check everything is green:
+
+```
+/worklog:doctor
 ```
 
-`worklog setup` registers the tick with whatever the OS provides —
-`schtasks` on Windows, a launchd agent on macOS, `crontab` on Linux — pointing
-at a stable runtime copy under `~/.worklog/runtime/` so a plugin upgrade cannot
-orphan the schedule. Use `--interval N` to change the cadence from 5 minutes.
+Work as usual. A few minutes later, `/worklog:today` shows what you did.
+To import past git history once:
 
-Then edit `~/.worklog/config.json` to point at your work:
+```bash
+worklog backfill --since 2026-01-01
+```
+
+> **Tip:** put the ticket key in your branch name (`ABC-123/fix-login`) or
+> mention it in a prompt. That's how Worklog knows which ticket the work belongs to.
+
+---
+
+## Skills
+
+Inside Claude Code, Worklog adds skills under the `/worklog:` prefix.
+
+### Commands you type
+
+| Skill | What it does | Example |
+| --- | --- | --- |
+| `/worklog:setup` | Set up or repair: data folder, background job, repos, then a health check | `/worklog:setup` |
+| `/worklog:doctor` | Health checks with a fix for each problem, plus today's model spend. Changes nothing. | `/worklog:doctor` |
+| `/worklog:today` | The daily note for today or any day | `/worklog:today yesterday` |
+| `/worklog:item` | Everything recorded for one ticket, with file paths to open | `/worklog:item ABC-123` |
+| `/worklog:search` | Search titles, commits, docs and findings | `/worklog:search deadlock` |
+| `/worklog:recent` | Tickets touched in the last N days, in a month, or all | `/worklog:recent 14` |
+| `/worklog:standup` | Yesterday / Today / Blockers draft from your notes | `/worklog:standup` |
+| `/worklog:handover` | A handover note for a ticket: context, ruled out, root cause, next steps | `/worklog:handover ABC-123` |
+| `/worklog:timesheet` | Activity per ticket per day, as a week, a month or CSV | `/worklog:timesheet month csv` |
+| `/worklog:export` | One-file Markdown/HTML copy of a ticket, strictly redacted for sharing | `/worklog:export ABC-123 html` |
+| `/worklog:tick` | Build the notes now instead of waiting for the next run | `/worklog:tick` |
+| `/worklog:sync` | Re-scan your repos and docs folders for new commits and docs | `/worklog:sync` |
+| `/worklog:pause` | Pause or resume recording, or show its state | `/worklog:pause resume` |
+| `/worklog:config` | Show or change a setting; every change can be undone | `/worklog:config set model.enabled false` |
+
+### Skills Claude uses on its own
+
+You don't type these. Claude picks them up when what you say matches.
+
+| Skill | When it kicks in | Example of what you'd say |
+| --- | --- | --- |
+| `recall` | You ask about past work or mention a ticket key | *"What did we find on ABC-123?"*, *"What did I do last Tuesday?"* |
+| `note` | You state a finding, suspicion, ruled-out cause or decision | *"Log finding: the retry queue drains on restart"*, *"Rule out the cache"* |
+
+Every answer from `recall` cites the file or recorded event it came from. If
+something wasn't recorded, it says so instead of guessing.
+
+> **About the activity sheet:** Worklog records *events*, not durations, so
+> `/worklog:timesheet` shows how active each ticket was per day, not hours.
+
+There is also a catch-all slash command, `/worklog <anything>`, that runs the
+CLI with your arguments, for example `/worklog list`.
+
+---
+
+## Commands
+
+Everything the skills do is also available in a terminal as `worklog …`
+(Option B or C install). Most read commands accept `--json`.
+
+### Daily use
+
+| Command | What it does |
+| --- | --- |
+| `worklog today [YYYY-MM-DD]` | Print the daily note (today by default) |
+| `worklog item <KEY>` | Print the rolling note for a ticket |
+| `worklog <KEY>` / `worklog ticket <KEY>` | Ticket detail: commits, PRs, docs, findings, root cause |
+| `worklog list` | All tickets, newest activity first |
+| `worklog recent [--days N]` | Tickets touched in the last N days (default 7) |
+| `worklog month YYYY-MM` | Tickets active in a month |
+| `worklog search <text>` | Search titles, commit messages, docs and findings |
+| `worklog stats` | Totals: tickets, commits, docs, date range |
+| `worklog note --ticket <KEY> --kind <kind> "<text>"` | Record a finding. Kinds: `finding`, `hypothesis`, `ruled-out`, `decision`, `note`. |
+| `worklog open <KEY>` | Open the newest linked doc in your editor |
+
+### Reports and sharing
+
+| Command | What it does |
+| --- | --- |
+| `worklog week [--date D] [--csv]` | Activity per ticket per day for the week (Mon–Sun) |
+| `worklog timesheet [--month] [--date D] [--csv]` | Same sheet, for a week or a calendar month |
+| `worklog export <KEY> [--format md\|html] [--out FILE]` | Write a strictly redacted copy to `~/.worklog/exports/` |
+
+### Capture and the background job
+
+| Command | What it does |
+| --- | --- |
+| `worklog tick [--force] [DAY]` | Summarise new events now; `--force DAY` redoes a day |
+| `worklog pause` / `worklog resume` | Stop or restart recording (hooks stay loaded) |
+| `worklog status` | Recording on or off, last run, model spend, health counts |
+| `worklog schedule [--interval N]` / `worklog unschedule` | Add or remove the OS-scheduled background job |
+
+### Git and docs import
+
+| Command | What it does |
+| --- | --- |
+| `worklog sync` | Incremental scan of your repos and docs folders |
+| `worklog backfill [--since DATE]` | Full or windowed scan (first-time import) |
+
+### Setup and settings
+
+| Command | What it does |
+| --- | --- |
+| `worklog install` | Copy the plugin into `~/.claude/plugins/worklog` |
+| `worklog setup [--interval N]` | Create the data folder, copy the runtime, schedule the job |
+| `worklog doctor` | Read-only health checks, each with a fix |
+| `worklog config` | Print the config and data paths |
+| `worklog config get <key>` / `set <key> <value>` | Read or change a setting (dotted keys) |
+| `worklog config undo` / `history` | Revert the last change / list changes |
+| `worklog init` | Create the default config |
+| `worklog help` | Help text |
+
+---
+
+## Configuration
+
+Settings live in `~/.worklog/config.json`. Change them with
+`worklog config set` (or `/worklog:config`) rather than by hand: each change
+is validated, backed up and can be undone with `worklog config undo`.
 
 ```json
 {
-  "repos": [
-    "C:\\Projects\\api-service",
-    "C:\\Projects\\web-app"
-  ],
-  "docsFolders": [
-    "C:\\Projects\\docs"
-  ],
+  "repos":       ["C:\\Projects\\api-service", "C:\\Projects\\web-app"],
+  "docsFolders": ["C:\\Projects\\docs"],
   "keyPrefixes": [],
-  "authors": {
-    "names": ["Your Name"],
-    "emails": ["you@example.com"]
-  },
-  "ado":  { "org": "", "project": "" },
-  "jira": { "site": "" },
-  "docOpenScheme": "vscode",
+  "authors":     { "names": ["Your Name"], "emails": ["you@example.com"] },
 
   "capture":   { "enabled": true, "paused": false, "retainRawDays": 30 },
   "redaction": { "mode": "secrets", "names": [], "extraPatterns": [] },
   "tick":      { "enabled": true, "intervalMinutes": 5 },
-  "model":     { "enabled": true, "command": "claude", "dailyBudgetUsd": 1.0 }
+  "model":     { "enabled": true, "command": "claude", "dailyBudgetUsd": 1.0,
+                 "maxCallsPerTick": 2, "maxCallsPerDay": 40 }
 }
 ```
 
-| Field | What it does |
+| Setting | What it does |
 | --- | --- |
-| `repos` | Absolute paths to git repos to scan |
+| `repos` | Absolute paths of git repos to import commits from |
 | `docsFolders` | Folders scanned recursively for `*.md` files |
-| `keyPrefixes` | **Leave empty to accept any `PROJ-123` style key** — switching projects needs zero code change. Set `["DEMO","TASK"]` to restrict. |
-| `authors` | Filters git log to just your commits (OR'd across names and emails) |
-| `capture` | Session capture. `paused: true` keeps hooks loaded but records nothing. Raw events are deleted after `retainRawDays`; the notes stay. |
-| `redaction` | `local` \| `secrets` \| `public` — see §4. `names` are masked in free text. |
-| `tick` | Background summarisation. `enabled: false` stops the schedule; `worklog tick --force` still runs. |
-| `model` | Extraction via `claude -p`. Capped by `maxCallsPerTick`, `maxCallsPerDay` and `dailyBudgetUsd`. Set `enabled: false` for a fully offline worklog. |
+| `keyPrefixes` | `[]` accepts any `PROJ-123` key. `["ABC","OPS"]` accepts only those prefixes. |
+| `authors` | Only import commits by these names or emails |
+| `capture.paused` | `true` keeps hooks loaded but records nothing |
+| `capture.retainRawDays` | Raw events are deleted after this many days; notes are kept |
+| `redaction.mode` | `local`, `secrets` (default) or `public`; see below |
+| `redaction.names` | Names to mask wherever they appear in text |
+| `redaction.extraPatterns` | Your own regexes to mask |
+| `tick.enabled` / `intervalMinutes` | Turn the background job on or off, and how often it runs |
+| `model.enabled` | `false` = fully offline, no model calls ever |
+| `model.dailyBudgetUsd`, `maxCallsPerTick`, `maxCallsPerDay` | Spending caps for model calls |
 
-Change settings through the CLI so every write is backed up and reversible:
+Common changes:
 
-```powershell
-worklog config set redaction.mode public
-worklog config set model.dailyBudgetUsd 0.25
-worklog config undo                          # revert the last change
-worklog config history                       # what changed, and when
+```bash
+worklog config set model.enabled false          # never call a model
+worklog config set model.dailyBudgetUsd 0.25    # cap spend at $0.25/day
+worklog config set redaction.mode public        # also mask paths, hosts, IPs
+worklog config set keyPrefixes '["ABC","OPS"]'  # only these ticket prefixes
+worklog config undo                             # take the last change back
 ```
-
-For the git/docs side of the record:
-
-```powershell
-worklog backfill --since 2026-01-01
-```
-
-That's the one-time full scan. Everything after that is incremental.
 
 ---
 
-## 3. Use it
+## Privacy and safety
 
-### What you did today
+**Nothing leaves your machine unless you send it.** There is no telemetry and no
+network code. The only outside call is the optional `claude -p` summary, which
+is sent already redacted and is capped by your budget.
 
-```powershell
-worklog today                       # the daily note, rendered from captured sessions
-worklog today 2026-10-20            # any past day
-worklog item DEMO-4349              # rolling note: timeline, findings, files, commands
-worklog status                      # capture on? tick fresh? what has it spent?
-```
+### Redaction
 
-These read notes the tick already wrote. To summarise right now instead of
-waiting for the schedule:
+Text is masked three times: when it's captured, again before any model call,
+and again before an export. Each mode masks everything the previous one does,
+plus more:
 
-```powershell
-worklog tick                        # process everything not yet summarised
-worklog tick --force 2026-10-20     # redo one day from the raw log
-worklog pause                       # stop recording (hooks stay loaded)
-worklog resume
-```
-
-### Day-to-day queries
-
-```powershell
-worklog list                        # all tickets, newest activity first
-worklog recent --days 7             # what you touched this week
-worklog month 2026-08               # tickets active in August
-worklog DEMO-4349                   # ticket detail (commits, docs, findings, RCA)
-worklog search deadlock             # grep titles, commit msgs, doc names, findings
-worklog stats                       # overall counts
-worklog _unassigned                 # commits/docs with no key found
-```
-
-### Keeping it current
-
-```powershell
-worklog sync                        # incremental re-scan (seconds, not minutes)
-worklog backfill --since 2026-10-01 # explicit window override
-```
-
-### Logging findings as you investigate
-
-```powershell
-worklog note --ticket DEMO-4349 --kind ruled-out "transactionscope was not the cause"
-worklog note --ticket DEMO-4349 --kind finding   "retry queue drains on process restart"
-```
-
-Kinds: `finding | hypothesis | ruled-out | decision | note`.
-
-### Activity sheet and export
-
-```powershell
-worklog week                              # this ISO week, events per item per day
-worklog timesheet --month --date 2026-09-15 --csv
-worklog export DEMO-4349                  # ~/.worklog/exports/DEMO-4349-<date>.md
-worklog export DEMO-4349 --format html    # single self-contained HTML page
-```
-
-The capture log records events, not durations, so the sheet counts recorded
-events, sessions and commits. It is a measure of activity, never of hours.
-An export is always redacted at `public` level, whatever `redaction.mode`
-says, because the file is meant to leave the machine. `--out FILE` is
-accepted only inside the write allowlist.
-
-### Opening the ticket's doc
-
-```powershell
-worklog open DEMO-4349   # opens the newest linked .md in VS Code
-```
-
-### JSON mode (for scripts and Claude)
-
-```powershell
-worklog list     --json
-worklog DEMO-4349 --json
-worklog recent  --days 7 --json
-worklog search  deadlock --json
-worklog stats   --json
-```
-
-### Inside Claude Code
-
-Once the plugin is installed and Claude Code is restarted, type:
-
-```
-/worklog DEMO-4349
-/worklog recent --days 7
-/worklog search deadlock
-/worklog sync
-```
-
-The slash command just shells out to the `worklog` CLI; output is shown inline.
-
-### Skills
-
-The plugin also ships one skill per task, namespaced `/worklog:<name>`. They call
-the bundled CLI directly (`node "${CLAUDE_PLUGIN_ROOT}/bin/worklog.mjs"`), so
-they work without `npm link`. Skills marked *explicit* only run when you type
-them. The two *model-invoked* skills are picked up automatically when what you
-say matches.
-
-| Skill | Kind | What it does |
+| Mode | Use when text is going to… | Masks |
 | --- | --- | --- |
-| `/worklog:setup` | explicit | Create the data home, schedule the tick, set repos/docs, then run doctor |
-| `/worklog:doctor` | explicit | Health checks and today's spend; diagnoses only |
-| `/worklog:pause [resume\|status]` | explicit | Stop or restart capture |
-| `/worklog:today [day]` | explicit | The daily note for today or any day |
-| `/worklog:item <KEY>` | explicit | Everything recorded for one item, with paths to open |
-| `/worklog:search <words>` | explicit | Matches across titles, commits, docs and findings |
-| `/worklog:tick [--force] [day]` | explicit | Summarise captured events now |
-| `/worklog:sync [--since D]` | explicit | Re-scan repos and docs folders |
-| `/worklog:recent [range]` | explicit | Items touched in N days, a month, or all; stats |
-| `/worklog:timesheet [month] [date] [csv]` | explicit | Activity per item per day (events, **not hours**) |
-| `/worklog:standup [day]` | explicit | Yesterday / Today / Blockers from the daily notes |
-| `/worklog:handover <KEY>` | explicit | A cited handover note for one item (shown, not written) |
-| `/worklog:export <KEY> [md\|html]` | explicit | One-file copy with `public` redaction |
-| `/worklog:config …` | explicit | Get, set, undo and history for settings |
-| `recall` | model-invoked | Answers "what do we know about ABC-123?" from the worklog, citing files |
-| `note` | model-invoked | Records "log finding: …" / "ruled out …" via `worklog note` |
+| `local` | your own disk | passwords, tokens, API keys, connection strings, private keys, high-entropy blobs |
+| `secrets` *(default)* | a model call | the above, plus emails, phone numbers and your `redaction.names` |
+| `public` | another person or machine | the above, plus absolute paths, hostnames and IP addresses |
 
-`test/skills.test.mjs` checks every skill's frontmatter and that each CLI
-subcommand a skill runs actually exists.
+`worklog export` always uses `public`, whatever your setting.
 
-### Full command reference
+### What Worklog will never do
 
-| Command | Purpose |
-| --- | --- |
-| `worklog install` | Copy plugin to `~/.claude/plugins/worklog` |
-| `worklog setup [--interval N]` | Create the data home and schedule the tick |
-| `worklog doctor` | 13 read-only health checks, each with the command that fixes it |
-| `worklog status` | Capture state, last tick, model spend, health counts |
-| `worklog schedule` / `unschedule` | Register or remove the OS-scheduled tick |
-| `worklog pause` / `resume` | Stop or restart event capture |
-| `worklog tick [--force] [DAY]` | Summarise captured events into notes now |
-| `worklog today [DAY]` | Print the daily note |
-| `worklog item <KEY>` | Print the rolling note for one work item |
-| `worklog init` | Create default config |
-| `worklog config` | Print config and data paths |
-| `worklog config set/get/undo/history` | Change a setting, reversibly |
-| `worklog backfill [--since DATE]` | Full / windowed scan |
-| `worklog sync` | Incremental re-scan |
-| `worklog list` | All tickets, newest activity first |
-| `worklog recent [--days N]` | Tickets touched in last N days (default 7) |
-| `worklog month YYYY-MM` | Tickets active in that month |
-| `worklog search <text>` | Grep across titles, commits, docs, findings |
-| `worklog stats` | Counts (tickets, commits, docs, date range) |
-| `worklog <KEY>` or `worklog ticket <KEY>` | Ticket detail |
-| `worklog note --ticket <KEY> --kind <k> "<text>"` | Add a finding |
-| `worklog open <KEY>` | Open newest linked doc in VS Code |
-| `worklog week [--date D] [--csv]` | Activity per item per day for the ISO week |
-| `worklog timesheet [--month] [--date D] [--csv]` | Same sheet, week or month |
-| `worklog export <KEY> [--format md\|html] [--out FILE]` | Public-redacted copy of the item note |
-| `worklog help` | Help text |
+- **Write outside its own folders.** Writes are limited to `~/.worklog`, the
+  plugin folder and the temp folder. Anything else is refused, and there is no switch to allow it.
+- **Change your work.** Repos, Git hosts, issue trackers and databases are only
+  read. `git` is only run with read-only subcommands.
+- **Run arbitrary programs.** Only a fixed list (`git`, `claude`, the OS
+  scheduler, an editor launcher) can start, never through a shell.
+- **Break your session.** Hooks catch every error, log it to
+  `~/.worklog/logs/errors.log` and let Claude Code carry on.
 
-All read commands (`list`, `month`, `recent`, `search`, `stats`, `ticket`, `<KEY>`, `week`, `timesheet`) support `--json`.
+These rules are enforced by tests. See [`CLAUDE.md`](CLAUDE.md).
+
+### Turning things off
+
+```bash
+worklog pause                          # stop recording
+worklog config set model.enabled false # no model calls
+worklog unschedule                     # stop the background job
+```
 
 ---
 
-## 4. Privacy and safety
+## Where your data lives
 
-Nothing leaves your machine unless you send it somewhere. There is no telemetry
-and no network client in the codebase.
-
-### Redaction modes are destinations, not severity levels
-
-Each mode is a superset of the one before it:
-
-| Mode | Where the text is going | What is masked |
-| --- | --- | --- |
-| `local` | your own disk | credentials, tokens, keys, connection strings, high-entropy blobs |
-| `secrets` | leaving the process (a model call) | the above, plus emails, phone numbers and your configured `names` |
-| `public` | leaving the machine (an export, a paste) | the above, plus absolute paths, hostnames and IP addresses |
-
-The default is `secrets`. Capture always masks at the configured mode, the
-model digest is masked again before it is sent, and extracted text is masked a
-third time at `public` level before it reaches a note.
-
-### What the plugin may touch
-
-`scripts/lib/safety.mjs` is the only module allowed to start a process, write
-to disk or open a socket, and `test/safety-static.test.mjs` scans every other
-source file and fails the build if one reaches for those APIs directly.
-
-- **Writes** are confined to `~/.worklog`, the plugin install dir and the temp
-  dir. A write anywhere else throws. There is no flag to turn this off.
-- **Processes** come from a fixed allowlist (`git`, `claude`, the schedulers,
-  an editor launcher), always spawned with an argv array and never through a
-  shell. `git` is only ever invoked with reading subcommands.
-- **Your repos, Git hosts, databases and issue trackers are read-only.**
-
-### Turning parts of it off
-
-```powershell
-worklog pause                                  # stop recording entirely
-worklog config set model.enabled false         # local-only, no model calls ever
-worklog config set capture.retainRawDays 7     # keep less raw history
-worklog config set redaction.mode public       # mask paths and hosts too
-worklog unschedule                             # stop the background tick
-```
-
-To delete everything, remove `~/.worklog`. Nothing lives anywhere else.
-
----
-
-## 5. Publish to npm
-
-So that you (or anyone) can `npm install -g` it later from any machine.
-
-### 5.1 Decide the package name
-
-Scoped is safest — the name is always available under your scope:
-
-```powershell
-npm view @yourscope/worklog-claude     # should 404 (not taken)
-```
-
-Edit `package.json` → set `"name": "@yourscope/worklog-claude"` (or keep
-unscoped if `worklog-claude` is free).
-
-### 5.2 Fill in metadata
-
-```json
-{
-  "name": "@yourscope/worklog-claude",
-  "version": "0.1.0",
-  "description": "...",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/mahamadtohid-nonstopio/Karmavritta.git"
-  },
-  "homepage": "https://github.com/mahamadtohid-nonstopio/Karmavritta#readme",
-  "bugs": { "url": "https://github.com/mahamadtohid-nonstopio/Karmavritta/issues" },
-  "author": "Your Name <you@example.com>",
-  "license": "MIT"
-}
-```
-
-### 5.3 One-time npm account setup
-
-```powershell
-npm adduser                 # or: npm login
-npm whoami                  # confirm who you are
-```
-
-Enable **2FA** on https://www.npmjs.com/settings/<you>/profile — npm blocks
-publish on new accounts without it.
-
-### 5.4 Pre-publish sanity check
-
-```powershell
-npm test                    # should say "fail 0"
-npm pack --dry-run          # list every file that will ship
-```
-
-The `npm pack --dry-run` output should include `bin/`, `scripts/`, `hooks/`,
-`prompts/`, `commands/`, `skills/`, `.claude-plugin/`, `CLAUDE.md`, `README.md`
-and `package.json` — and nothing else. If `test/` or `node_modules/` sneak in,
-tighten the `files` field in `package.json` or add a `.npmignore`.
-
-### 5.5 Publish
-
-```powershell
-# Unscoped
-npm publish
-
-# Scoped (first publish needs --access public)
-npm publish --access public
-```
-
-Appears at `https://www.npmjs.com/package/<name>` within ~30s.
-
-### 5.6 Install from anywhere later
-
-```powershell
-npm install -g @yourscope/worklog-claude
-worklog install
-worklog init
-# ...edit config, backfill
-```
-
-### 5.7 Publishing updates
-
-```powershell
-npm version patch   # 0.1.0 → 0.1.1  bug fix
-npm version minor   # 0.1.0 → 0.2.0  new feature
-npm version major   # 0.1.0 → 1.0.0  breaking
-npm publish
-```
-
-`npm version` edits `package.json` and tags the commit (if the folder is a git repo).
-
-### 5.8 Common gotchas
-
-| Symptom | Fix |
-| --- | --- |
-| `402 Payment Required` on scoped publish | Add `--access public` |
-| `403 Forbidden` | Name is taken, or you're not logged in — `npm whoami` |
-| `E2FA` | Enable 2FA on npmjs.com, then `npm login` again |
-| `bad option: --test` | Node too old. Use Node ≥ 18 (`nvm use 22`) |
-| `worklog: command not found` after `npm link` | On Windows, run PowerShell as admin and re-link |
-
----
-
-## 6. Smoke test before you publish
-
-Run these in order. Each one either prints something sensible or exits with a
-clear error. If anything surprises you, pause.
-
-```powershell
-# 1. Config loads
-worklog config
-
-# 2. Full backfill works
-worklog backfill --since 2026-01-01
-
-# 3. Queries are fast and show real data
-worklog list
-worklog recent --days 7
-worklog stats
-worklog search deadlock          # try a word you know appears in your repos
-
-# 4. Ticket detail works
-worklog <KEY-YOU-SAW-IN-LIST>
-
-# 5. Incremental sync is incremental
-worklog sync                      # should say "scanning <repo> since <date>..."
-
-# 6. Note persists
-worklog note --ticket <KEY> --kind finding "test from smoke run"
-worklog <KEY>                     # confirm it shows in Findings
-
-# 7. JSON mode is parseable
-worklog list --json | ConvertFrom-Json | Select -First 2
-
-# 8. Install flow works end-to-end
-worklog install
-worklog setup
-worklog doctor                    # expect 0 failing
-# → restart Claude Code → use a tool in a session → then:
-worklog tick
-worklog today                     # the session you just had, summarised
-```
-
-Nuclear-option clean-slate test (optional, best right before publish):
-
-```powershell
-npm unlink -g worklog-claude
-Remove-Item -Recurse $HOME\.claude\plugins\worklog
-Remove-Item -Recurse $HOME\.worklog
-
-cd C:\Vibe-code\worklog-plugin
-npm link
-worklog install
-worklog init
-# fill config, backfill, verify queries
-```
-
-If this works, strangers running `npm install -g <pkg>` will have the same experience.
-
----
-
-## 7. Where things live
+Everything is under `~/.worklog` (set `WORKLOG_DIR` to use another folder):
 
 | What | Path |
 | --- | --- |
-| CLI config | `~/.worklog/config.json` |
-| Ticket records | `~/.worklog/tickets/<KEY>.json` |
-| Unassigned bucket | `~/.worklog/tickets/_unassigned.json` |
-| Raw captured events | `~/.worklog/raw/<YYYY-MM-DD>/<session>.jsonl` |
-| Daily notes | `~/.worklog/daily/<YYYY-MM-DD>.md` |
-| Per-item notes | `~/.worklog/items/<KEY>/README.md` |
-| Index cache | `~/.worklog/index.json` |
-| Tick state (per-day fingerprints) | `~/.worklog/state.json` |
-| Model spend ledger | `~/.worklog/spend.json` |
-| Config backups + change history | `~/.worklog/backups/config/` |
-| Hook and tick errors | `~/.worklog/logs/errors.log` |
-| Runtime copy the scheduler runs | `~/.worklog/runtime/` |
-| Plugin install | `~/.claude/plugins/worklog/` |
+| Settings | `config.json` |
+| Daily notes | `daily/<YYYY-MM-DD>.md` |
+| Per-ticket notes | `items/<KEY>/README.md` |
+| Ticket records (source of truth) | `tickets/<KEY>.json` |
+| Commits and docs with no key | `tickets/_unassigned.json` |
+| Raw captured events | `raw/<YYYY-MM-DD>/<session>.jsonl` |
+| Exports | `exports/` |
+| Settings backups and history | `backups/config/` |
+| Model spend ledger | `spend.json` |
+| Errors from hooks and the background job | `logs/errors.log` |
+| Runtime the background job runs | `runtime/` |
 
-Notes are generated — the tick overwrites them. Anything you want to keep goes
-into the ticket record via `worklog note`, which the notes then render.
-
-Override the data dir for testing with `WORKLOG_DIR=/tmp/sandbox`.
+Notes are regenerated on every run, so edits to them are overwritten. To add
+something permanent, use `worklog note` (or just tell Claude: *"log finding: …"*).
 
 ---
 
-## 8. Uninstall
+## Troubleshooting
 
-```powershell
-npm unlink -g worklog-claude                           # or: npm uninstall -g worklog-claude
-Remove-Item -Recurse $HOME\.claude\plugins\worklog
-Remove-Item -Recurse $HOME\.worklog         # drops your data (optional)
+| Problem | Fix |
+| --- | --- |
+| Anything odd | Run `/worklog:doctor` (or `worklog doctor`). Each failing row prints its fix. |
+| `/worklog:today` says "no note yet" | Run `/worklog:tick` to summarise now, or wait for the next 5-minute run. |
+| Work shows up as "Unattributed" | No ticket key was seen. Put the key in the branch name or a prompt. |
+| `bad option: --test`, `.at is not a function` or similar errors | Your `node` is older than 18. Check `node --version` and `where node` (Windows) or `which -a node`; an older Node earlier on PATH wins. |
+| Skills don't appear | Restart Claude Code after installing. |
+| `worklog: command not found` | The marketplace install doesn't add a terminal command. Use Option B, or run `node ~/.worklog/runtime/bin/worklog.mjs …`. |
+| Background job never runs | Run `/worklog:setup` again. It recopies the runtime and reschedules. |
+
+---
+
+## Uninstall
+
+Remove the scheduled job first, then the plugin, then (optionally) your data:
+
+```bash
+worklog unschedule
+#   no `worklog` command? use: node ~/.worklog/runtime/bin/worklog.mjs unschedule
+
+/plugin uninstall worklog@karmavritta     # marketplace install (inside Claude Code)
+npm uninstall -g worklog-claude           # npm install
+rm -rf ~/.claude/plugins/worklog          # npm or source install (Windows: Remove-Item -Recurse)
+
+rm -rf ~/.worklog                         # deletes all your notes and records (optional)
 ```
 
 ---
 
-## 9. Development
+## Development
 
-```powershell
-npm test              # no deps, pure node:test
+```bash
+npm test     # pure node:test, no dependencies, synthetic data only
 ```
 
-`CLAUDE.md` holds the non-negotiable rules for changing this repo. Read it
-before your first change — several of them are enforced by tests.
-
-### Project layout
-
-```
-worklog-plugin/
-├── bin/worklog.mjs            # CLI entry (npm bin)
-├── .claude-plugin/plugin.json # Claude Code plugin manifest
-├── CLAUDE.md                  # the 10 rules this repo is held to
-├── commands/worklog.md        # /worklog slash command
-├── hooks/
-│   ├── hooks.json             # the five events Claude Code fires at us
-│   └── run.mjs                # fail-open hook entry point
-├── prompts/extract.md         # the extraction prompt (editable on disk)
-├── skills/worklog/SKILL.md    # finding/RCA logger skill
-├── scripts/
-│   ├── cli.mjs                # command dispatcher
-│   ├── install.mjs            # `worklog install` logic
-│   ├── tick.mjs               # scheduled tick entry point
-│   ├── sync.mjs               # git log + docs scan (batched, incremental)
-│   └── lib/
-│       ├── safety.mjs         # the only module that spawns, writes or sockets
-│       ├── paths.mjs          # pure path resolution (no cycle with safety)
-│       ├── config.mjs         # config loader with deep merge
-│       ├── configstore.mjs    # the one write path for config: lock, backup, undo
-│       ├── redact.mjs         # local | secrets | public masking
-│       ├── capture.mjs        # hook payload → redacted raw event line
-│       ├── agent.mjs          # the tick: ingest, merge, extract, render
-│       ├── extract.mjs        # model call + citation validation
-│       ├── render.mjs         # daily and per-item markdown
-│       ├── budget.mjs         # call caps and the spend ledger
-│       ├── scheduler.mjs      # schtasks / launchd / cron
-│       ├── doctor.mjs         # 13 read-only health checks
-│       ├── index.mjs          # index.json builder + lastSync tracker
-│       ├── keys.mjs           # ticket-key regex + prefix filter
-│       └── store.mjs          # read/write ticket JSON, lock, atomic write
-├── test/                      # pure node:test, synthetic fixtures only
-├── package.json
-└── README.md
-```
-
-### Design choices worth knowing
-
-- **One JSON per ticket, not a database.** Diffable, human-readable, trivially editable.
-- **File lock = mkdir.** Portable and atomic on every OS. Stale-lock recovery at 15s.
-- **Hooks are fail-open and silent.** They catch everything, log to `logs/errors.log` and exit 0. A broken hook must never break your session.
-- **Stable content-addressed ids.** Findings, files and events are keyed by a hash of their normalised text, so re-running the tick merges instead of duplicating.
-- **Counts are stored per day and summed, never incremented**, for the same reason.
-- **The tick skips unchanged days** by comparing a fingerprint of the day's event ids, and skips unchanged notes by comparing bytes.
-- **Prompts live on disk.** Retargeting extraction at a different domain is an edit to `prompts/extract.md`, not a code change. A copy under `~/.worklog/prompts/` wins over the packaged one.
-- **Batched upserts.** Sync groups events by ticket key first, so each ticket file is opened/locked exactly once per sync.
-- **Index cache.** `~/.worklog/index.json` holds per-ticket summaries so `list`/`month`/`recent`/`stats` don't open every ticket file.
-- **Incremental git log.** `index.json.lastSync[repo]` is passed as `--since=` on the next sync. Explicit `--since` on the CLI overrides.
-- **Mtime-cached docs scan.** `index.json.lastDocsScan` cuts work on huge docs trees.
-
----
-
-## 10. Roadmap
-
-- [x] **Store and backfill** — ticket records, git + docs scan, terminal queries, JSON mode, incremental sync, index cache
-- [x] **Safety and redaction** — write allowlist, command allowlist, three-mode masking, static enforcement test
-- [x] **Session capture** — hooks, raw event log, scheduler, `doctor`, config undo
-- [x] **Summarisation** — background tick, budget-capped extraction with cited evidence, daily and per-item notes
-- [ ] **Search and recall** — local inverted index, read-only MCP server, recall skill, `/worklog:` commands
-- [ ] **Enrichment** — Jira & Azure DevOps detail, HTML dashboard, `/worklog rca`
-
----
+Read [`CLAUDE.md`](CLAUDE.md) before changing anything: it holds the ten rules
+this repo is held to, and several are enforced by tests.
+[`docs/development.md`](docs/development.md) covers the project layout and
+design choices, and [`docs/publishing.md`](docs/publishing.md) covers releasing
+to the marketplace and npm.
 
 ## License
 
-MIT
+[MIT](LICENSE)
