@@ -72,12 +72,15 @@ worklog install     # copies the Claude Code plugin into ~/.claude/plugins/workl
 
 Then **restart Claude Code** once so it picks up the slash command.
 
-### From npm (after you publish — see §5)
+### From npm
 
 ```bash
-npm install -g worklog-claude      # or @yourscope/worklog-claude
-worklog install
+npm install -g worklog-claude
+worklog install     # copies the Claude Code plugin into ~/.claude/plugins/worklog
+worklog setup
 ```
+
+This also puts the `worklog` command on your PATH for use outside Claude Code.
 
 Requires **Node ≥ 18** and **git** on PATH.
 

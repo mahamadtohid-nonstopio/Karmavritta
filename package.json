@@ -2,12 +2,22 @@
   "name": "worklog-claude",
   "version": "0.3.0",
   "description": "Claude Code plugin that captures your sessions and keeps a per-ticket worklog (Jira/ADO/any prefix)",
+  "author": "Mahamadtohid (https://github.com/mahamadtohid-nonstopio)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mahamadtohid-nonstopio/Karmavritta.git"
+  },
+  "homepage": "https://github.com/mahamadtohid-nonstopio/Karmavritta#readme",
+  "bugs": {
+    "url": "https://github.com/mahamadtohid-nonstopio/Karmavritta/issues"
+  },
   "type": "module",
   "bin": {
-    "worklog": "./bin/worklog.mjs"
+    "worklog": "bin/worklog.mjs"
   },
   "scripts": {
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "prepublishOnly": "npm test"
   },
   "engines": {
     "node": ">=18"
