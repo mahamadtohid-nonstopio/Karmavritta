@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Worklog</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="skip" href="#main" id="skip">Skip to content</a>
+  <div class="shell">
+    <aside class="side" aria-label="Worklog">
+      <a class="brand" href="#/" aria-label="Worklog, go to Today">
+        <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 8h10M7 12h10M7 16h6"/></svg></span>
+        <span class="brand-name">Worklog</span>
+        <span class="ver" id="ver"></span>
+      </a>
+      <form class="search" role="search" id="search-form">
+        <label for="q" class="sr-only">Search everything</label>
+        <span class="search-icon" data-icon="search" aria-hidden="true"></span>
+        <input id="q" type="search" placeholder="Search everything" autocomplete="off" spellcheck="false">
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+      <nav class="nav" aria-label="Main">
+        <a href="#/" data-nav="today"><span data-icon="calendar" aria-hidden="true"></span><span>Today</span></a>
+        <a href="#/tickets" data-nav="tickets"><span data-icon="ticket" aria-hidden="true"></span><span>Tickets</span></a>
+        <a href="#/rcas" data-nav="rcas"><span data-icon="target" aria-hidden="true"></span><span>RCAs</span></a>
+        <a href="#/activity" data-nav="activity"><span data-icon="activity" aria-hidden="true"></span><span>Activity</span></a>
+        <a href="#/health" data-nav="health"><span data-icon="shield" aria-hidden="true"></span><span>Health</span><span class="badge" id="health-badge" hidden></span></a>
+      </nav>
+      <div class="side-foot" id="side-foot" aria-live="polite"></div>
+    </aside>
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

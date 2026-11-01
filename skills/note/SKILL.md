@@ -1,6 +1,6 @@
 ---
 name: note
-description: Record a finding, hypothesis, ruled-out cause, decision or note against a work item during an investigation. Use when the developer says "log finding", "note that", "rule this out", "the root cause is …", "decision: …" or a similar in-session observation tied to a ticket.
+description: 'Record a finding, hypothesis, ruled-out cause, decision or note against a work item during an investigation. Use when the developer says "log finding", "note that", "rule this out", "the root cause is …", "decision: …" or a similar in-session observation tied to a ticket.'
 argument-hint: "[--kind finding|hypothesis|ruled-out|decision|note] <text>"
 allowed-tools:
   - Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/worklog.mjs" note *)

@@ -23,14 +23,15 @@ note plus a running note per ticket. Afterwards you, or Claude, can ask
 2. [How it works](#how-it-works)
 3. [Install](#install)
 4. [Set it up](#set-it-up)
-5. [Skills](#skills)
-6. [Commands](#commands)
-7. [Configuration](#configuration)
-8. [Privacy and safety](#privacy-and-safety)
-9. [Where your data lives](#where-your-data-lives)
-10. [Troubleshooting](#troubleshooting)
-11. [Uninstall](#uninstall)
-12. [Development](#development)
+5. [Dashboard](#dashboard)
+6. [Skills](#skills)
+7. [Commands](#commands)
+8. [Configuration](#configuration)
+9. [Privacy and safety](#privacy-and-safety)
+10. [Where your data lives](#where-your-data-lives)
+11. [Troubleshooting](#troubleshooting)
+12. [Uninstall](#uninstall)
+13. [Development](#development)
 
 ---
 
@@ -42,6 +43,7 @@ note plus a running note per ticket. Afterwards you, or Claude, can ask
 | **Groups by ticket** | Any `[A-Z][A-Z0-9]+-\d+` key in a prompt, branch name, commit or file name ties the work to that ticket. Any prefix works out of the box. |
 | **Writes notes** | Every 5 minutes a background job turns new events into a **daily note** and a rolling **per-ticket note** (summary, findings, decisions, root cause, files, commands, timeline). |
 | **Imports git and docs** | Commits from your repos and Markdown docs from your folders are attached to the same tickets. |
+| **Dashboard** | A local web page: today, any day, every ticket, search, activity and health. Everything is clickable and searchable, with a one-click Summarise now. |
 | **Answers questions** | The `recall` skill lets Claude answer from your worklog and cite where each fact came from. |
 | **Standups and handovers** | Drafts a Yesterday/Today/Blockers standup or a ticket handover from what was actually recorded. |
 | **Activity sheet** | Activity per ticket per day for a week or month, as a table or CSV. |
@@ -140,6 +142,55 @@ worklog backfill --since 2026-01-01
 
 ---
 
+## Dashboard
+
+A local web page for browsing everything Worklog has recorded.
+
+```
+/worklog:dashboard                 # inside Claude Code
+worklog dashboard                  # or from a terminal
+```
+
+It starts a small server in the background (if one isn't already running),
+opens your browser at `http://127.0.0.1:7341/` and returns. Open a specific
+page directly:
+
+```
+worklog dashboard ticket ABC-123
+worklog dashboard day yesterday        # or: day 2026-10-28, day -3
+worklog dashboard search "retry queue"
+worklog dashboard rcas                 # or: rcas missing index  (opens filtered)
+worklog dashboard activity             # or: month, tickets, health
+worklog dashboard status               # is it running?
+worklog dashboard stop
+```
+
+| Page | What you see |
+| --- | --- |
+| **Today** | What you worked on today (or this week, with the Day/Week switch), tickets active this week, events waiting to be summarised and model spend. A banner walks you through any unfinished setup. **Summarise now** builds the notes on the spot. Refreshes every minute. |
+| **Day** | Any day's work, with previous/next active day and a date picker. |
+| **Tickets** | Every ticket, with All / Active this week / With findings tabs. Filter as you type, sort by any column, click a row to open it. With no tickets yet, it shows the two ways to get started. |
+| **Ticket** | The full record: root cause, findings (by kind), decisions, a day-by-day timeline, commits, PRs, docs, files touched and commands run. Section shortcuts at the top, and a copyable export command. |
+| **RCAs** | Every recorded root cause, newest first. Each card is headed `TICKET — title` and shows the Symptom, Cause and Fix. A search box filters as you type (every word must match, across key, title, symptom, cause and fix) and highlights the matches. |
+| **Search** | Every word must match, across ticket titles, findings, decisions, root causes, day summaries, commits, docs, commands and file paths. Matches are highlighted and can be filtered by type. |
+| **Activity** | A week or month heat map of events per ticket per day, with totals, active days and the busiest day. Click a cell to open that day. |
+| **Health** | A setup score, then the failing checks grouped by the one command that fixes them (in order, with copy buttons), then everything that passes. **Re-run checks** refreshes it. |
+
+**Everything is clickable.** Ticket keys anywhere in the text (even inside a
+finding), dates, search results and table rows all link through. Press `/` to
+jump to the search box.
+
+**Local, and views are read-only.** The server listens on `127.0.0.1` only,
+so nothing else on your network can reach it. Every page only reads. The one
+action is **Summarise now**, which runs the same tick as `worklog tick` and
+writes only to Worklog's own data folder. That request is accepted only from
+the dashboard page itself: it must carry the page's own `Origin` and a custom
+header, which other websites can't send. The server also rejects any request
+whose `Host` header isn't its own, which blocks other web pages from reading it,
+and it serves a strict Content Security Policy. Use `--port N` if 7341 is taken, and `--no-open` to skip opening the browser.
+
+---
+
 ## Skills
 
 Inside Claude Code, Worklog adds skills under the `/worklog:` prefix.
@@ -150,6 +201,7 @@ Inside Claude Code, Worklog adds skills under the `/worklog:` prefix.
 | --- | --- | --- |
 | `/worklog:setup` | Set up or repair: data folder, background job, repos, then a health check | `/worklog:setup` |
 | `/worklog:doctor` | Health checks with a fix for each problem, plus today's model spend. Changes nothing. | `/worklog:doctor` |
+| `/worklog:dashboard` | Open the local dashboard (today, a day, a ticket, root causes, search, activity, health) | `/worklog:dashboard ticket ABC-123` |
 | `/worklog:today` | The daily note for today or any day | `/worklog:today yesterday` |
 | `/worklog:item` | Everything recorded for one ticket, with file paths to open | `/worklog:item ABC-123` |
 | `/worklog:search` | Search titles, commits, docs and findings | `/worklog:search deadlock` |
@@ -210,6 +262,8 @@ Everything the skills do is also available in a terminal as `worklog …`
 | `worklog week [--date D] [--csv]` | Activity per ticket per day for the week (Mon–Sun) |
 | `worklog timesheet [--month] [--date D] [--csv]` | Same sheet, for a week or a calendar month |
 | `worklog export <KEY> [--format md\|html] [--out FILE]` | Write a strictly redacted copy to `~/.worklog/exports/` |
+| `worklog dashboard [page] [--port N] [--no-open]` | Open the local dashboard, starting it if needed. Pages: `today`, `day <D>`, `ticket <KEY>`, `tickets`, `rcas [words]`, `search <words>`, `activity`, `month`, `health` |
+| `worklog dashboard status` / `stop` | Is the dashboard running? / stop it |
 
 ### Capture and the background job
 
@@ -292,9 +346,10 @@ worklog config undo                             # take the last change back
 
 ## Privacy and safety
 
-**Nothing leaves your machine unless you send it.** There is no telemetry and no
-network code. The only outside call is the optional `claude -p` summary, which
-is sent already redacted and is capped by your budget.
+**Nothing leaves your machine unless you send it.** There is no telemetry. The
+only outside call is the optional `claude -p` summary, which is sent already
+redacted and is capped by your budget. The only socket Worklog opens is the
+dashboard, and it is hard-bound to `127.0.0.1`: there is no option to expose it.
 
 ### Redaction
 
@@ -316,8 +371,8 @@ plus more:
   plugin folder and the temp folder. Anything else is refused, and there is no switch to allow it.
 - **Change your work.** Repos, Git hosts, issue trackers and databases are only
   read. `git` is only run with read-only subcommands.
-- **Run arbitrary programs.** Only a fixed list (`git`, `claude`, the OS
-  scheduler, an editor launcher) can start, never through a shell.
+- **Run arbitrary programs.** Only a fixed list (`git`, `claude`, `node`, the OS
+  scheduler, an editor launcher, the browser opener) can start, never through a shell.
 - **Break your session.** Hooks catch every error, log it to
   `~/.worklog/logs/errors.log` and let Claude Code carry on.
 
@@ -349,6 +404,7 @@ Everything is under `~/.worklog` (set `WORKLOG_DIR` to use another folder):
 | Settings backups and history | `backups/config/` |
 | Model spend ledger | `spend.json` |
 | Errors from hooks and the background job | `logs/errors.log` |
+| Running dashboard (pid and port) | `dashboard.json` |
 | Runtime the background job runs | `runtime/` |
 
 Notes are regenerated on every run, so edits to them are overwritten. To add
@@ -367,14 +423,17 @@ something permanent, use `worklog note` (or just tell Claude: *"log finding: …
 | Skills don't appear | Restart Claude Code after installing. |
 | `worklog: command not found` | The marketplace install doesn't add a terminal command. Use Option B, or run `node ~/.worklog/runtime/bin/worklog.mjs …`. |
 | Background job never runs | Run `/worklog:setup` again. It recopies the runtime and reschedules. |
+| Dashboard says the port is taken | Another program uses 7341. Run `worklog dashboard --port 7342`. |
+| Dashboard page says "Something went wrong" | The server stopped. Run `worklog dashboard` again. |
 
 ---
 
 ## Uninstall
 
-Remove the scheduled job first, then the plugin, then (optionally) your data:
+Stop the dashboard and remove the scheduled job first, then the plugin, then (optionally) your data:
 
 ```bash
+worklog dashboard stop
 worklog unschedule
 #   no `worklog` command? use: node ~/.worklog/runtime/bin/worklog.mjs unschedule
 

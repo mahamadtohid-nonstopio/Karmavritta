@@ -18,6 +18,7 @@ several are enforced by tests:
 | `test/redteam.test.mjs` | planted (fabricated) secrets never survive redaction |
 | `test/skills.test.mjs` | every skill is well-formed and only calls CLI subcommands that exist |
 | `test/install.test.mjs` | the runtime copy exists where the scheduler points; manifest versions agree |
+| `test/dashboard.test.mjs` | loopback-only server, Host check, GET-only, static allowlist, every route, search ranking, start/reuse/stop |
 
 Tests set `WORKLOG_DIR` to a temp folder and invent their own fixtures. No test
 touches the real data home or a real repo.
@@ -42,6 +43,7 @@ touches the real data home or a real repo.
 │   ├── install.mjs            # `worklog install` and the runtime refresh used by setup
 │   ├── tick.mjs               # scheduled tick entry point
 │   ├── sync.mjs               # git log + docs scan (batched, incremental)
+│   ├── dashboard/             # the dashboard page: index.html, app.js, app.css (no framework, no CDN)
 │   └── lib/
 │       ├── safety.mjs         # the only module that spawns, writes or opens sockets
 │       ├── paths.mjs          # pure path resolution (no cycle with safety)
@@ -53,6 +55,7 @@ touches the real data home or a real repo.
 │       ├── extract.mjs        # model call + citation validation
 │       ├── render.mjs         # daily and per-item markdown
 │       ├── report.mjs         # activity sheet and public-redacted export (pure)
+│       ├── dashboard.mjs      # dashboard request handler, data routes and search (pure: no socket)
 │       ├── budget.mjs         # call caps and the spend ledger
 │       ├── scheduler.mjs      # schtasks / launchd / cron
 │       ├── doctor.mjs         # read-only health checks
@@ -94,6 +97,25 @@ touches the real data home or a real repo.
 - **Batched upserts and an index cache.** Sync opens each ticket file once per run;
   `index.json` lets `list` / `recent` / `month` / `stats` avoid opening every ticket.
 - **Incremental git log.** `index.json.lastSync[repo]` becomes `--since` on the next sync.
+- **Dashboard split.** `safety.serveLocal` owns the socket and is hard-bound to
+  127.0.0.1. `lib/dashboard.mjs` is a `{method, url, host, origin, action} → {status, headers, body}`
+  handler, so every route is tested without a network. Request bodies are never read.
+- **The one write.** `POST /api/tick` ("Summarise now") runs `runTick()`, which writes
+  only to the data home. It requires our own `Origin` and an `X-Worklog-Action: tick`
+  header. A cross-site page can't add that header without a CORS preflight, which
+  this server never answers. Every other non-GET request gets 405, and only one
+  tick runs at a time (409 otherwise).
+- **Health cache.** `diagnose()` starts git, claude and the scheduler, so its result is
+  cached for 60 s for the sidebar badge. `?fresh=1` (Re-run checks) bypasses the cache. The page is plain JS and
+  writes all recorded text with `textContent`, so recorded data can't inject markup.
+  The CSP forbids inline scripts and styles, so dynamic values (such as heat-map
+  intensity) go through `element.style.setProperty`.
+- **Dashboard lifecycle.** `worklog dashboard` pings `/api/ping`. Our server
+  answers with its version, pid and data home. A matching server is reused; an
+  older one (or one serving another data home) is replaced. Only a process that
+  identified itself through that ping is ever stopped. On Windows the browser is
+  opened with `rundll32 url.dll,FileProtocolHandler`, because `cmd /c start`
+  would re-parse `&` in the URL.
 
 ## Roadmap
 
@@ -104,4 +126,5 @@ touches the real data home or a real repo.
 - [x] **Skills**: `/worklog:` commands, recall and note skills, standup, handover, activity sheet, export
 - [ ] **Search index and MCP**: local full-text index and a read-only MCP server for recall
 - [ ] **Durations**: per-session time in the raw log (with a migration), so the sheet can show hours
-- [ ] **Enrichment**: Jira and Azure DevOps detail, local dashboard
+- [x] **Dashboard**: local read-only web UI with today, days, tickets, search, activity and health
+- [ ] **Enrichment**: Jira and Azure DevOps detail, a settings page on the dashboard

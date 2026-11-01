@@ -46,6 +46,22 @@ for (const dir of skills) {
       MODEL_INVOKED.has(dir) ? 'should be model-invoked' : 'should set disable-model-invocation: true');
   });
 
+  test(`skill ${dir}: frontmatter values are valid YAML scalars`, () => {
+    // An unquoted value containing ": " or " #" is a YAML error, and Claude Code
+    // then loads the skill with NO metadata: the description silently vanishes.
+    const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
+    for (const line of block.split(/\r?\n/)) {
+      const kv = line.match(/^([a-z-]+):\s+(.+)$/);
+      if (!kv) continue;
+      const v = kv[2].trim();
+      if (/^["']/.test(v)) {
+        assert.equal(v.at(-1), v[0], `${kv[1]}: quoted value must close with the same quote`);
+        continue;
+      }
+      assert.doesNotMatch(v, /: | #/, `${kv[1]}: quote this value; ": " or " #" breaks YAML`);
+    }
+  });
+
   test(`skill ${dir}: every CLI subcommand it runs exists`, () => {
     const used = [...text.matchAll(/bin\/worklog\.mjs"\s+([a-z_-]+)/g)].map((m) => m[1]);
     for (const sub of used) assert.ok(SUBCOMMANDS.has(sub), `unknown subcommand "${sub}"`);

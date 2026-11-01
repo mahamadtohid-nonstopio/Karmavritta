@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync, spawn } from 'node:child_process';
+import http from 'node:http';
 import { getWorklogDir, getPluginInstallDir } from './paths.mjs';
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,8 @@ const BASE_COMMANDS = [
   'code',      // open a doc
   'open',
   'xdg-open',
-  'cmd'        // Windows `start`, used only by openExternal
+  'cmd',       // Windows `start`, used only by openExternal
+  'rundll32'   // Windows URL handler, used only by openBrowser (no shell parsing)
 ];
 
 const extraCommands = new Set();
@@ -244,6 +246,112 @@ export async function openExternal(target) {
     : process.platform === 'darwin'
       ? [['code', [target]], ['open', [target]]]
       : [['code', [target]], ['xdg-open', [target]]];
+  for (const [cmd, args] of candidates) {
+    if (await spawnDetached(cmd, args)) return cmd;
+  }
+  return null;
+}
+
+// --- background processes -----------------------------------------------------
+
+/**
+ * Start an allowlisted command fully detached (used for the dashboard server)
+ * and return its pid, or null if it could not start. No shell, argv only.
+ */
+export function spawnBackground(command, args = [], { env } = {}) {
+  assertCommand(command);
+  try {
+    const child = spawn(command, args, {
+      stdio: 'ignore', detached: true, windowsHide: true,
+      env: env ? { ...process.env, ...env } : process.env
+    });
+    child.on('error', () => {});
+    child.unref();
+    return child.pid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stop a process we started. Callers must verify it is ours first (see dashboard ping). */
+export function stopProcess(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  try { process.kill(pid); return true; } catch { return false; }
+}
+
+// --- local network --------------------------------------------------------------
+
+// The dashboard is the only socket Worklog opens. It is hard-bound to the IPv4
+// loopback address: there is no parameter that could expose it on a LAN.
+export const LOOPBACK = '127.0.0.1';
+
+/**
+ * Serve `handler` on 127.0.0.1. The handler receives
+ * { method, url, host, origin, action } and returns { status, headers, body }.
+ * Request bodies are never read, so no payload a page sends can reach the handler.
+ * Resolves to { port, close } once listening; rejects on EADDRINUSE etc.
+ */
+export function serveLocal(handler, { port = 0 } = {}) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(async (req, res) => {
+      let out;
+      try {
+        out = await handler({
+          method: req.method, url: req.url || '/', host: req.headers.host || '',
+          origin: req.headers.origin || '', action: req.headers['x-worklog-action'] || ''
+        });
+      } catch (e) {
+        out = { status: 500, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: 'Internal error' };
+      }
+      res.writeHead(out.status || 200, out.headers || {});
+      res.end(req.method === 'HEAD' ? undefined : (out.body ?? ''));
+    });
+    server.requestTimeout = 30_000;
+    server.on('error', reject);
+    server.listen(port, LOOPBACK, () => {
+      server.off('error', reject);
+      resolve({
+        port: server.address().port,
+        close: () => new Promise((r) => server.close(() => r()))
+      });
+    });
+  });
+}
+
+/**
+ * GET a path on our own loopback server. Resolves to { status, json } or null
+ * when nothing answers. Only ever talks to 127.0.0.1.
+ */
+export function probeLocal(port, pathname = '/api/ping', { timeoutMs = 800 } = {}) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: LOOPBACK, port, path: pathname, timeout: timeoutMs,
+      headers: { Host: `${LOOPBACK}:${port}` } }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { if (data.length < 65536) data += c; });
+      res.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(data); } catch {}
+        resolve({ status: res.statusCode, json });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/**
+ * Open one of our own loopback URLs in the default browser. Refuses anything
+ * else. On Windows this uses rundll32's URL handler rather than `cmd /c start`,
+ * because cmd.exe would re-parse `&` in a query string as a command separator.
+ */
+export async function openBrowser(url) {
+  if (!/^http:\/\/127\.0\.0\.1:\d{1,5}\/[A-Za-z0-9\-._~:/?#@!$'()*+,;=%&]*$/.test(String(url))) {
+    throw new SafetyError(`Refusing to open a URL that is not the local dashboard: ${url}`);
+  }
+  const candidates = process.platform === 'win32'
+    ? [['rundll32', ['url.dll,FileProtocolHandler', url]]]
+    : process.platform === 'darwin' ? [['open', [url]]] : [['xdg-open', [url]]];
   for (const [cmd, args] of candidates) {
     if (await spawnDetached(cmd, args)) return cmd;
   }

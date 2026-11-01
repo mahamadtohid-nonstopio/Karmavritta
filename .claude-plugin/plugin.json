@@ -1,7 +1,7 @@
 {
   "name": "worklog",
   "displayName": "Worklog",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Captures Claude Code sessions and auto-logs commits, docs and findings per ticket",
   "author": {
     "name": "Mahamadtohid",

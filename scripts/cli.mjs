@@ -19,6 +19,9 @@ import { summary as spendSummary } from './lib/budget.mjs';
 import { periodDays, activitySheet, sheetToCsv, sheetToText, exportItem } from './lib/report.mjs';
 import { getExportsDir } from './lib/paths.mjs';
 import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createHandler, dashboardVersion } from './lib/dashboard.mjs';
 
 export async function main(argv) {
   const [cmd, ...rest] = argv;
@@ -52,6 +55,7 @@ export async function main(argv) {
     case 'week':         return showSheet('week', flags, { json });
     case 'timesheet':    return showSheet(flags.month ? 'month' : 'week', flags, { json });
     case 'export':       return exportCmd(positional[0], flags);
+    case 'dashboard':    return dashboardCmd(rest);
     case 'ticket':
     case 'show':         return showTicket(positional[0], { json });
     case 'help':
@@ -104,6 +108,11 @@ Backfill and query:
   worklog timesheet [--month] ...   Same sheet; --month for the calendar month
   worklog export <KEY> [--format md|html] [--out FILE]
                                     Write a public-redacted copy of the item note to exports/
+  worklog dashboard [page] [--port N] [--no-open]
+                                    Open the local read-only dashboard (starts it if needed).
+                                    page: today | day <D|yesterday|-N> | ticket <KEY> | tickets |
+                                          rcas [words] | search <words> | activity | month | health
+  worklog dashboard status|stop     Is it running? / stop it
   worklog open <KEY>                Open the ticket's most recent doc in VS Code
   worklog <KEY>                     Show a ticket summary (e.g. worklog DEMO-4349)
   worklog ticket <KEY>              Same as above
@@ -613,4 +622,188 @@ async function exportCmd(key, flags) {
   console.log(result.masked.length
     ? `  masked (public redaction): ${result.masked.join(', ')}`
     : '  nothing needed masking (public redaction applied)');
+}
+
+// --- dashboard -----------------------------------------------------------------
+
+const DEFAULT_DASHBOARD_PORT = 7341;
+const CLI_BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'worklog.mjs');
+const dashboardStatePath = () => path.join(getWorklogDir(), 'dashboard.json');
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function localToday(offsetDays = 0) {
+  const d = new Date(Date.now() + offsetDays * 86_400_000);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+/** Map `worklog dashboard <page…>` to a hash route. Returns { route } or { error }. */
+export function dashboardRoute(words = []) {
+  const [page = 'today', ...rest] = words;
+  const arg = rest.join(' ').trim();
+  switch (page.toLowerCase()) {
+    case 'today': return { route: '#/' };
+    case 'yesterday': return { route: `#/day/${localToday(-1)}` };
+    case 'day': {
+      const v = (arg || 'today').toLowerCase();
+      let day = null;
+      if (v === 'today') day = localToday();
+      else if (v === 'yesterday') day = localToday(-1);
+      else if (/^-\d{1,4}$/.test(v)) day = localToday(Number(v));
+      else if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))) day = v;
+      return day ? { route: `#/day/${day}` } : { error: `Not a day: ${arg}. Use YYYY-MM-DD, today, yesterday or -N.` };
+    }
+    case 'ticket': case 'item': {
+      const key = arg.toUpperCase();
+      return isValidKey(key) ? { route: `#/ticket/${key}` } : { error: `Not a ticket key: ${arg || '(nothing)'}` };
+    }
+    case 'search': return { route: arg ? `#/search?q=${encodeURIComponent(arg)}` : '#/search' };
+    case 'tickets': return { route: '#/tickets' };
+    case 'rca': case 'rcas': return { route: arg ? `#/rcas?q=${encodeURIComponent(arg)}` : '#/rcas' };
+    case 'activity': case 'week': case 'timesheet': return { route: '#/activity' };
+    case 'month': return { route: '#/activity?period=month' };
+    case 'health': case 'doctor': return { route: '#/health' };
+    default: {
+      const key = page.toUpperCase();
+      if (isValidKey(key)) return { route: `#/ticket/${key}` };
+      return { error: `Unknown page: ${page}. Try today, day <D>, ticket <KEY>, tickets, rcas [words], search <words>, activity, month or health.` };
+    }
+  }
+}
+
+function parseDashboardArgs(args) {
+  const out = { words: [], port: DEFAULT_DASHBOARD_PORT, open: true, json: false, error: null };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--no-open') out.open = false;
+    else if (a === '--json') out.json = true;
+    else if (a === '--port') {
+      const n = Number(args[++i]);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) out.error = `--port must be 1-65535, got ${args[i] ?? '(nothing)'}`;
+      else out.port = n;
+    } else out.words.push(a);
+  }
+  return out;
+}
+
+async function pingDashboard(port) {
+  const r = await safety.probeLocal(port, '/api/ping');
+  if (!r) return { state: 'free' };
+  if (r.json?.app === 'worklog') return { state: 'worklog', info: r.json };
+  return { state: 'foreign' };
+}
+
+async function waitFor(port, wanted, timeoutMs = 8000) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const p = await pingDashboard(port);
+    if (wanted(p)) return p;
+    await pause(150);
+  }
+  return null;
+}
+
+/** Make sure our dashboard, for this data home and this version, answers on `port`. */
+async function ensureDashboard(port) {
+  const here = getWorklogDir();
+  let p = await pingDashboard(port);
+  if (p.state === 'foreign') return { error: `Port ${port} is held by another program. Try --port <other>.` };
+  if (p.state === 'worklog') {
+    if (p.info.version === dashboardVersion() && path.resolve(p.info.dataHome || '') === path.resolve(here)) {
+      return { port, reused: true, pid: p.info.pid };
+    }
+    // An older copy, or one serving another data home: replace it.
+    if (p.info.pid) safety.stopProcess(p.info.pid);
+    if (!(await waitFor(port, (x) => x.state === 'free', 5000))) {
+      return { error: `An older dashboard on port ${port} did not stop. Run \`worklog dashboard stop\` and try again.` };
+    }
+  }
+  const pid = safety.spawnBackground(process.execPath, [CLI_BIN, 'dashboard', 'serve', '--port', String(port)], { env: { WORKLOG_DIR: here } });
+  if (!pid) return { error: 'Could not start the dashboard process.' };
+  p = await waitFor(port, (x) => x.state !== 'free');
+  if (!p) return { error: `The dashboard did not start on port ${port}. Try \`worklog dashboard serve --port ${port}\` to see why.` };
+  if (p.state === 'foreign') return { error: `Port ${port} is held by another program. Try --port <other>.` };
+  return { port, reused: false, pid: p.info.pid };
+}
+
+async function serveDashboard(port) {
+  const ctx = { pid: process.pid };
+  let srv;
+  try {
+    srv = await safety.serveLocal(createHandler(ctx), { port });
+  } catch (e) {
+    console.error(e.code === 'EADDRINUSE' ? `Port ${port} is in use by another program.` : `Could not start: ${e.message}`);
+    process.exit(1);
+  }
+  ctx.port = srv.port;
+  try {
+    safety.writeJsonAtomic(dashboardStatePath(), {
+      pid: process.pid, port: srv.port, version: dashboardVersion(), startedAt: new Date().toISOString()
+    });
+  } catch { /* the state file is a convenience; the ping is the source of truth */ }
+  console.log(`Worklog dashboard on http://127.0.0.1:${srv.port}/  (Ctrl+C to stop)`);
+  const shutdown = async () => {
+    try {
+      const st = JSON.parse(fs.readFileSync(dashboardStatePath(), 'utf8'));
+      if (st.pid === process.pid) safety.removePath(dashboardStatePath());
+    } catch {}
+    await srv.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+function statePort(fallback) {
+  try { return JSON.parse(fs.readFileSync(dashboardStatePath(), 'utf8')).port || fallback; } catch { return fallback; }
+}
+
+async function dashboardCmd(rawArgs) {
+  const a = parseDashboardArgs(rawArgs);
+  if (a.error) { console.error(a.error); process.exit(1); }
+  const sub = a.words[0];
+  const explicitPort = rawArgs.includes('--port');
+
+  if (sub === 'serve') return serveDashboard(a.port);
+
+  if (sub === 'status') {
+    const port = explicitPort ? a.port : statePort(a.port);
+    const p = await pingDashboard(port);
+    const res = p.state === 'worklog'
+      ? { running: true, url: `http://127.0.0.1:${port}/`, pid: p.info.pid, version: p.info.version, dataHome: p.info.dataHome }
+      : { running: false, port, portHeldByOther: p.state === 'foreign' };
+    if (a.json) { console.log(JSON.stringify(res, null, 2)); return; }
+    console.log(res.running
+      ? `Running: ${res.url}  (pid ${res.pid}, v${res.version})`
+      : `Not running on port ${port}${res.portHeldByOther ? ' (another program holds that port)' : ''}. Start it with \`worklog dashboard\`.`);
+    return;
+  }
+
+  if (sub === 'stop') {
+    const port = explicitPort ? a.port : statePort(a.port);
+    const p = await pingDashboard(port);
+    if (p.state !== 'worklog') { console.log(`No Worklog dashboard is running on port ${port}.`); return; }
+    // Only a process that answered our own ping with its pid is ever stopped.
+    safety.stopProcess(p.info.pid);
+    const gone = await waitFor(port, (x) => x.state === 'free', 5000);
+    try { if (fs.existsSync(dashboardStatePath())) safety.removePath(dashboardStatePath()); } catch {}
+    console.log(gone ? `✓ dashboard stopped (pid ${p.info.pid})` : `! asked pid ${p.info.pid} to stop, but port ${port} still answers`);
+    if (!gone) process.exitCode = 1;
+    return;
+  }
+
+  const r = dashboardRoute(a.words);
+  if (r.error) { console.error(r.error); process.exit(1); }
+  const port = explicitPort ? a.port : statePort(a.port);
+  const s = await ensureDashboard(port);
+  if (s.error) { console.error(s.error); process.exit(1); }
+  const url = `http://127.0.0.1:${s.port}/${r.route}`;
+  if (a.json) console.log(JSON.stringify({ url, reused: s.reused, pid: s.pid }, null, 2));
+  else {
+    console.log(`${s.reused ? 'Dashboard already running' : '✓ dashboard started'} (pid ${s.pid}, local only)`);
+    console.log(url);
+  }
+  if (a.open) {
+    const opened = await safety.openBrowser(url);
+    if (!opened && !a.json) console.log('  (could not open a browser; open the address above yourself)');
+  }
 }
