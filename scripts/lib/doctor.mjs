@@ -3,11 +3,12 @@ import path from 'node:path';
 import * as safety from './safety.mjs';
 import {
   getWorklogDir, getConfigPath, getRawDir, getErrorsLog, getRuntimeDir,
-  getPluginInstallDir, getStatePath, loadConfig
+  getStatePath, loadConfig
 } from './config.mjs';
 import { listRawDays, readRawDay } from './capture.mjs';
 import * as scheduler from './scheduler.mjs';
 import { summary as spendSummary } from './budget.mjs';
+import { installedWorklog, PACKAGE_ROOT } from './claudeplugins.mjs';
 
 // Diagnoses; changes nothing. Every check reports a status and, when something
 // is wrong, the exact command that fixes it.
@@ -50,30 +51,33 @@ function checkConfig() {
   }
 }
 
+// Claude Code loads plugins it installed from a marketplace (recorded in
+// ~/.claude/plugins/installed_plugins.json) or from `claude --plugin-dir`.
 function checkPluginInstall() {
-  const dir = getPluginInstallDir();
-  if (!fs.existsSync(dir)) {
-    return check('plugin install', WARN, `not installed at ${dir}`, 'Run: worklog install');
+  const inst = installedWorklog();
+  if (inst) {
+    const where = [inst.version && `v${inst.version}`, inst.scope && `${inst.scope} scope`].filter(Boolean).join(', ');
+    return check('plugin install', OK, `${inst.id}${where ? ` (${where})` : ''}`);
   }
-  const hooks = path.join(dir, 'hooks', 'hooks.json');
-  if (!fs.existsSync(hooks)) {
-    return check('plugin install', FAIL, 'hooks/hooks.json missing from the install', 'Run: worklog install');
-  }
-  return check('plugin install', OK, dir);
+  return check('plugin install', WARN, 'not installed in Claude Code (fine if you start it with --plugin-dir)', 'Run: worklog install');
 }
 
+// Validates the manifest Claude Code will load: the installed copy if there is
+// one, otherwise this package's own. Whether hooks actually fire is the
+// `capture` check's job.
 function checkHooksManifest() {
-  const manifest = path.join(getPluginInstallDir(), 'hooks', 'hooks.json');
-  if (!fs.existsSync(manifest)) {
-    return check('hooks', WARN, 'no installed hooks manifest', 'Run: worklog install, then restart Claude Code');
-  }
+  const inst = installedWorklog();
+  const base = inst?.installPath && fs.existsSync(inst.installPath) ? inst.installPath : PACKAGE_ROOT;
+  const manifest = path.join(base, 'hooks', 'hooks.json');
+  const fix = inst ? `Run: claude plugin update ${inst.id}` : 'Reinstall worklog-claude';
+  if (!fs.existsSync(manifest)) return check('hooks', FAIL, `no hooks manifest at ${manifest}`, fix);
   try {
     const parsed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
     const events = Object.keys(parsed.hooks || {});
-    if (!events.length) return check('hooks', FAIL, 'manifest declares no events', 'Run: worklog install');
+    if (!events.length) return check('hooks', FAIL, 'manifest declares no events', fix);
     return check('hooks', OK, events.join(', '));
   } catch (e) {
-    return check('hooks', FAIL, `manifest is not valid JSON: ${e.message}`, 'Run: worklog install');
+    return check('hooks', FAIL, `manifest is not valid JSON: ${e.message}`, fix);
   }
 }
 
@@ -81,7 +85,7 @@ function checkRuntimeCopy() {
   const tick = path.join(getRuntimeDir(), 'scripts', 'tick.mjs');
   return fs.existsSync(tick)
     ? check('runtime copy', OK, getRuntimeDir())
-    : check('runtime copy', WARN, 'no runtime copy for the scheduled tick', 'Run: worklog install');
+    : check('runtime copy', WARN, 'no runtime copy for the scheduled tick', 'Run: worklog setup');
 }
 
 function checkScheduler() {
@@ -89,9 +93,9 @@ function checkScheduler() {
     const s = scheduler.status();
     return s.installed
       ? check('tick schedule', OK, `${s.kind}: ${s.detail}`)
-      : check('tick schedule', WARN, `${s.kind}: not scheduled`, 'Run: worklog schedule');
+      : check('tick schedule', WARN, `${s.kind}: not scheduled`, 'Run: worklog setup');
   } catch (e) {
-    return check('tick schedule', WARN, e.message, 'Run: worklog schedule');
+    return check('tick schedule', WARN, e.message, 'Run: worklog setup');
   }
 }
 
@@ -121,7 +125,7 @@ function checkTickState() {
     const ageMin = (Date.now() - Date.parse(state.lastTick)) / 60_000;
     const detail = `${state.lastTick} (${ageMin.toFixed(0)} min ago)`;
     return ageMin > 120
-      ? check('last tick', WARN, detail, 'Run: worklog schedule')
+      ? check('last tick', WARN, detail, 'Run: worklog setup')
       : check('last tick', OK, detail);
   } catch (e) {
     return check('last tick', WARN, e.message);

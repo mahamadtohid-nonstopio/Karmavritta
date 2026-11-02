@@ -11,7 +11,7 @@
       "displayName": "Worklog",
       "source": "./",
       "description": "Captures Claude Code sessions into daily and per-ticket notes, with a local dashboard, recall, standups, handovers, activity sheets and redacted export.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "category": "productivity"
     }
   ]

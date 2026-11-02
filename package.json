@@ -1,6 +1,6 @@
 {
   "name": "worklog-claude",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Claude Code plugin that captures your sessions and keeps a per-ticket worklog (Jira/ADO/any prefix)",
   "author": "Mahamadtohid (https://github.com/mahamadtohid-nonstopio)",
   "repository": {

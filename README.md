@@ -96,12 +96,30 @@ Restart Claude Code, then run `/worklog:setup`.
 
 ```bash
 npm install -g worklog-claude
-worklog install      # copies the plugin into ~/.claude/plugins/worklog
+worklog install      # prepares the runtime and prints the two commands below
 ```
 
-Restart Claude Code, then run `worklog setup`.
+`worklog install` prints the exact commands for your machine. They add the
+installed package to Claude Code as a local marketplace:
 
-**Update later:** `npm update -g worklog-claude && worklog install && worklog setup`.
+```bash
+claude plugin marketplace add "<folder worklog install printed>"
+claude plugin install worklog@karmavritta
+```
+
+Restart Claude Code, then run `/worklog:setup` (or `worklog setup`). Worklog
+never changes Claude Code's settings itself; you run these two commands.
+If you already added the GitHub marketplace (Option A), skip them: it's the
+same plugin, and the `karmavritta` name can only be used once.
+
+**Update later:**
+
+```bash
+npm update -g worklog-claude
+claude plugin marketplace update karmavritta
+claude plugin update worklog@karmavritta
+worklog setup
+```
 
 ### Option C: from source
 
@@ -109,8 +127,11 @@ Restart Claude Code, then run `worklog setup`.
 git clone https://github.com/mahamadtohid-nonstopio/Karmavritta.git
 cd Karmavritta
 npm link             # puts `worklog` on your PATH
-worklog install
+worklog install      # prints the commands that add this folder to Claude Code
 ```
+
+To try a working copy without installing it at all, start Claude Code with
+`claude --plugin-dir <path-to-the-clone>`. It loads only for that session.
 
 ---
 
@@ -285,7 +306,7 @@ Everything the skills do is also available in a terminal as `worklog …`
 
 | Command | What it does |
 | --- | --- |
-| `worklog install` | Copy the plugin into `~/.claude/plugins/worklog` |
+| `worklog install` | Prepare the runtime and print the two `claude plugin` commands that add Worklog to Claude Code |
 | `worklog setup [--interval N]` | Create the data folder, copy the runtime, schedule the job |
 | `worklog doctor` | Read-only health checks, each with a fix |
 | `worklog config` | Print the config and data paths |
@@ -437,9 +458,9 @@ worklog dashboard stop
 worklog unschedule
 #   no `worklog` command? use: node ~/.worklog/runtime/bin/worklog.mjs unschedule
 
-/plugin uninstall worklog@karmavritta     # marketplace install (inside Claude Code)
-npm uninstall -g worklog-claude           # npm install
-rm -rf ~/.claude/plugins/worklog          # npm or source install (Windows: Remove-Item -Recurse)
+claude plugin uninstall worklog@karmavritta   # or /plugin uninstall … inside Claude Code
+claude plugin marketplace remove karmavritta
+npm uninstall -g worklog-claude                # npm install only
 
 rm -rf ~/.worklog                         # deletes all your notes and records (optional)
 ```

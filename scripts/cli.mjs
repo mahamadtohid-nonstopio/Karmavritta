@@ -74,7 +74,7 @@ function help() {
   console.log(`worklog — per-ticket activity log
 
 Setup and health:
-  worklog install                   Install the plugin into ~/.claude/plugins/worklog
+  worklog install                   Prepare the runtime; print the commands that add Worklog to Claude Code
   worklog setup [--interval N]      Create the data home and schedule the background tick
   worklog doctor                    Diagnose capture, tick, scheduler and budget
   worklog status                    One-line view of capture, last tick and spend

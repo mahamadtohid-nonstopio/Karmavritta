@@ -40,7 +40,7 @@ touches the real data home or a real repo.
 ├── skills/<name>/SKILL.md     # one folder per /worklog:<name> skill; recall and note are model-invoked
 ├── scripts/
 │   ├── cli.mjs                # command dispatcher
-│   ├── install.mjs            # `worklog install` and the runtime refresh used by setup
+│   ├── install.mjs            # `worklog install` (prints the claude plugin commands) and the runtime refresh used by setup
 │   ├── tick.mjs               # scheduled tick entry point
 │   ├── sync.mjs               # git log + docs scan (batched, incremental)
 │   ├── dashboard/             # the dashboard page: index.html, app.js, app.css (no framework, no CDN)
@@ -59,6 +59,7 @@ touches the real data home or a real repo.
 │       ├── budget.mjs         # call caps and the spend ledger
 │       ├── scheduler.mjs      # schtasks / launchd / cron
 │       ├── doctor.mjs         # read-only health checks
+│       ├── claudeplugins.mjs  # read-only view of Claude Code's installed_plugins.json
 │       ├── index.mjs          # index.json builder + lastSync tracker
 │       ├── keys.mjs           # ticket-key regex + prefix filter
 │       └── store.mjs          # read/write ticket JSON, lock, atomic write
